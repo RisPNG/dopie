@@ -1,0 +1,19 @@
+{
+  "slices": [
+    {
+      "id": "text-counter",
+      "name": "Text Counter",
+      "version": "1.0.0",
+      "description": "Count words, characters, and lines.",
+      "category": "Text",
+      "author": "DoPie",
+      "license": "MIT",
+      "download_url": "https://example.test/text-counter-1.0.0.zip",
+      "sha256": "sha256:replace-with-package-digest",
+      "api_version": 1,
+      "python": ">=3.11",
+      "platforms": ["linux", "win32"],
+      "architectures": ["x86_64", "AMD64"]
+    }
+  ]
+}

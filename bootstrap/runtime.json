@@ -1,0 +1,13 @@
+{
+  "version": "3.11.14",
+  "windows": {
+    "url": "https://github.com/RisPNG/MsPy/releases/download/3.11.14/MsPy-3_11_14-win.zip",
+    "sha256": "575162a0ecccb7c8a419d758174733c31a0f5ac0ae534e17c1e31e1fe0567733",
+    "python": "MsPy-3_11_14/python.exe"
+  },
+  "linux": {
+    "url": "https://github.com/RisPNG/MsPy/releases/download/3.11.14/MsPy-3_11_14-linux.zip",
+    "sha256": "abd329f7b29c7c62b780942cec1b8e79a49e371f848098bdd4ab796391d2a851",
+    "python": "MsPy-3_11_14/bin/python3.11"
+  }
+}
