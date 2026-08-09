@@ -76,6 +76,34 @@ def test_first_update_check_compares_a_git_checkout_before_recording_its_baselin
     assert json.loads(state.read_text(encoding="utf-8"))["revision"] == "checkout-revision"
 
 
+def test_update_check_refreshes_stale_state_from_an_advanced_git_checkout(tmp_path, monkeypatch):
+    project = tmp_path / "project"
+    project.mkdir()
+    project.joinpath(".git").mkdir()
+    project.joinpath("pyproject.toml").write_text(
+        '[project]\nname = "dopie"\nversion = "0.1.0"\n',
+        encoding="utf-8",
+    )
+    state = tmp_path / "application" / "current.json"
+    state.parent.mkdir()
+    state.write_text(
+        json.dumps({"version": "0.1.0", "revision": "stale-revision", "path": str(project)}),
+        encoding="utf-8",
+    )
+    source = SourceDefinition("dopie", "DoPie", "https://github.com/owner/dopie")
+    monkeypatch.setattr(RemoteRepositoryClient, "resolve_revision", lambda self: "checkout-revision")
+    monkeypatch.setattr("dopie.updates.service.shutil.which", lambda executable: f"/usr/bin/{executable}")
+    monkeypatch.setattr(
+        "dopie.updates.service.subprocess.run",
+        lambda *args, **kwargs: SimpleNamespace(stdout="checkout-revision\n"),
+    )
+
+    revision = ApplicationUpdateService(tmp_path / "updates", state, project).check_for_update(source)
+
+    assert revision is None
+    assert json.loads(state.read_text(encoding="utf-8"))["revision"] == "checkout-revision"
+
+
 def test_prepares_application_update_without_touching_active_source(tmp_path, monkeypatch):
     archive = BytesIO()
     with zipfile.ZipFile(archive, "w") as package:

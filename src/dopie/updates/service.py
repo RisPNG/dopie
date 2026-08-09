@@ -25,19 +25,20 @@ class ApplicationUpdateService:
         token: str | None = None,
     ) -> str | None:
         revision = RemoteRepositoryClient(source, token).resolve_revision()
-        installed_revision = None
+        recorded_revision = None
         if self.state.exists():
-            installed_revision = json.loads(self.state.read_text(encoding="utf-8")).get("revision")
-        if installed_revision is None:
-            if (self.active_application / ".git").exists() and shutil.which("git"):
-                installed_revision = subprocess.run(
-                    ["git", "-C", str(self.active_application), "rev-parse", "HEAD"],
-                    check=True,
-                    capture_output=True,
-                    text=True,
-                ).stdout.strip()
-            else:
-                installed_revision = revision
+            recorded_revision = json.loads(self.state.read_text(encoding="utf-8")).get("revision")
+        installed_revision = recorded_revision
+        if (self.active_application / ".git").exists() and shutil.which("git"):
+            installed_revision = subprocess.run(
+                ["git", "-C", str(self.active_application), "rev-parse", "HEAD"],
+                check=True,
+                capture_output=True,
+                text=True,
+            ).stdout.strip()
+        elif installed_revision is None:
+            installed_revision = revision
+        if recorded_revision != installed_revision:
             with (self.active_application / "pyproject.toml").open("rb") as stream:
                 version = str(tomllib.load(stream)["project"]["version"])
             self.state.parent.mkdir(parents=True, exist_ok=True)
