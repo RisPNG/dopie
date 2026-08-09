@@ -256,5 +256,7 @@ class MainWindow(QMainWindow):
         QMessageBox.about(
             self,
             "About DoPie",
-            f"DoPie {__version__}\n\nA cross-platform shell for focused Python automation Slices.",
+            f"DoPie {__version__}\n\n"
+            "A cross-platform shell for focused Python automation Slices.\n\n"
+            "MIT License\nCopyright © 2026 Ris",
         )

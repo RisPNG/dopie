@@ -21,7 +21,7 @@ def test_public_profile_is_applied_only_once(tmp_path, monkeypatch):
     source_paths.sources.write_text("[]", encoding="utf-8")
     profile = destination_root / "provisioning" / "DoPie.dopie-profile"
     profile.parent.mkdir()
-    PortableProfileService(source_paths).export_portable_profile(profile, include_slices=False)
+    PortableProfileService(source_paths).export_portable_profile(profile)
     monkeypatch.setenv("DOPIE_ROOT", str(destination_root))
     destination_paths = resolve_app_paths()
     backend = ProvisioningBackend(destination_paths)
@@ -49,7 +49,6 @@ def test_changed_private_profile_requires_authorization_again(tmp_path, monkeypa
     profile.parent.mkdir()
     PortableProfileService(source_paths).export_portable_profile(
         profile,
-        include_slices=False,
         password="transfer password",
     )
     monkeypatch.setenv("DOPIE_ROOT", str(destination_root))
@@ -70,7 +69,6 @@ def test_changed_private_profile_requires_authorization_again(tmp_path, monkeypa
     }
     PortableProfileService(source_paths).export_portable_profile(
         profile,
-        include_slices=False,
         password="replacement password",
     )
     assert backend.pending_provisioning().requires_password

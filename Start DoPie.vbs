@@ -1,5 +1,5 @@
 Option Explicit
-Dim shell, files, root, powershell, script, command
+Dim shell, files, root, powershell, script, command, setupMarker, setupLog, exitCode
 Set shell = CreateObject("WScript.Shell")
 Set files = CreateObject("Scripting.FileSystemObject")
 root = files.GetParentFolderName(WScript.ScriptFullName)
@@ -9,4 +9,14 @@ If Not files.FileExists(powershell) Then
 End If
 script = files.BuildPath(files.BuildPath(root, "bootstrap"), "Start DoPie.ps1")
 command = Chr(34) & powershell & Chr(34) & " -NoLogo -NoProfile -ExecutionPolicy Bypass -File " & Chr(34) & script & Chr(34)
+setupMarker = files.BuildPath(files.BuildPath(files.BuildPath(root, "runtime"), "windows"), ".setup-complete")
+If Not files.FileExists(setupMarker) Then
+    exitCode = shell.Run(command & " -PrepareOnly", 1, True)
+    If exitCode <> 0 Then
+        WScript.Quit exitCode
+    End If
+    Set setupLog = files.CreateTextFile(setupMarker, True)
+    setupLog.WriteLine "ready"
+    setupLog.Close
+End If
 shell.Run command, 0, False

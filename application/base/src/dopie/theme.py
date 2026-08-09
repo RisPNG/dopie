@@ -95,11 +95,12 @@ class ThemeController(QObject):
             QLabel#cardTitle {{ font-size: 16px; font-weight: 650; }}
             QLabel#muted {{ color: {colors.muted}; }}
             QFrame#card {{ background: {colors.surface}; border: 1px solid {colors.border}; border-radius: 12px; }}
-            QFrame#card:hover {{ background: {colors.surface_hover}; border-color: {colors.accent}; }}
+            QFrame#card:hover {{ background: {colors.surface_hover}; }}
             QListWidget#navigation {{ background: transparent; border: none; outline: none; font-size: 15px; }}
             QListWidget#navigation::item {{ border-radius: 8px; padding: 11px; margin: 2px 8px; }}
             QListWidget#navigation::item:selected {{ background: {colors.surface}; color: {colors.text}; }}
             QListWidget#grid {{ background: transparent; border: none; outline: none; }}
+            QListWidget#grid::item:hover, QListWidget#grid::item:selected {{ background: transparent; }}
             QToolButton#appMenu {{
                 background: {colors.surface};
                 border: 1px solid {colors.border};
@@ -150,7 +151,17 @@ class ThemeController(QObject):
                 background: {colors.surface};
                 border: 1px solid {colors.border};
                 border-radius: 8px;
+                outline: none;
             }}
+            QTreeWidget::item:focus {{ border: none; }}
+            QTreeWidget::item:selected {{ background: {colors.accent}; color: {colors.text}; }}
+            QToolButton#iconCheckBox {{
+                background: transparent;
+                border: none;
+                color: {colors.text};
+                padding: 0;
+            }}
+            QToolButton#iconCheckBox:hover {{ background: transparent; }}
             QProgressBar {{ border: 1px solid {colors.border}; border-radius: 6px; text-align: center; }}
             QProgressBar::chunk {{ background: {colors.accent}; border-radius: 5px; }}
             """

@@ -111,17 +111,21 @@ def restore_previous_application(root: Path) -> Path | None:
     return Path(previous["path"])
 
 
-def main(root: Path | None = None) -> int:
+def main(root: Path | None = None, prepare_only: bool = False) -> int:
     root = root or Path(__file__).resolve().parent.parent
     application = activate_prepared_update(root)
     try:
         python = prepare_application_environment(root, application)
+        if prepare_only:
+            return 0
         returncode, healthy = launch_application(root, application, python)
     except Exception:
         previous = restore_previous_application(root)
         if previous is None:
             raise
         python = prepare_application_environment(root, previous)
+        if prepare_only:
+            return 0
         return launch_application(root, previous, python)[0]
     if returncode == 0 or healthy:
         return returncode
@@ -133,4 +137,4 @@ def main(root: Path | None = None) -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(main(prepare_only="--prepare-only" in sys.argv[1:]))

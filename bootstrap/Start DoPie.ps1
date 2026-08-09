@@ -1,3 +1,5 @@
+param([switch]$PrepareOnly)
+
 $ErrorActionPreference = "Stop"
 $Root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Definition)
 $RuntimeManifest = Get-Content (Join-Path $Root "bootstrap\runtime.json") -Raw | ConvertFrom-Json
@@ -12,5 +14,10 @@ if (-not (Test-Path $Python)) {
     Expand-Archive -Path $Archive -DestinationPath (Split-Path -Parent $Archive) -Force
     Remove-Item $Archive
 }
-& $Python (Join-Path $Root "bootstrap\bootstrap.py")
+$Bootstrap = Join-Path $Root "bootstrap\bootstrap.py"
+if ($PrepareOnly) {
+    & $Python $Bootstrap --prepare-only
+} else {
+    & $Python $Bootstrap
+}
 exit $LASTEXITCODE

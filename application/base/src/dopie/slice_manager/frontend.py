@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import re
+import time
 from pathlib import Path
 from urllib.parse import urlparse
 
 from PySide6.QtCore import Qt, QThreadPool, Signal
 from PySide6.QtWidgets import (
+    QAbstractItemView,
     QCheckBox,
     QDialog,
     QDialogButtonBox,
@@ -26,11 +28,20 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from dopie.components.frontend import IconCheckBox
 from dopie.components.tasks import BackgroundTask
 from dopie.models import CatalogSlice, SourceDefinition
 from dopie.slice_manager.backend import CatalogRefresh, SliceManagerBackend
 from dopie.slices.compatibility import evaluate_slice_compatibility
 from dopie.sources.profile import PortableProfileService
+
+
+class DeselectableTreeWidget(QTreeWidget):
+    def mousePressEvent(self, event) -> None:
+        if self.itemAt(event.position().toPoint()) is None:
+            self.clearSelection()
+            self.setCurrentItem(None)
+        super().mousePressEvent(event)
 
 
 class SourceDialog(QDialog):
@@ -157,9 +168,10 @@ class SliceManagerPage(QWidget):
 
     def _build_installed_tab(self) -> None:
         layout = QVBoxLayout(self.installed_tab)
-        self.installed = QTreeWidget()
+        self.installed = DeselectableTreeWidget()
         self.installed.setHeaderLabels(["Slice", "Version", "Category", "Origin"])
-        self.installed.header().setSectionResizeMode(QHeaderView.ResizeToContents)
+        self.installed.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.installed.header().setSectionResizeMode(QHeaderView.Interactive)
         self.installed.header().setStretchLastSection(True)
         remove = QPushButton("Uninstall selected")
         remove.setObjectName("danger")
@@ -186,9 +198,10 @@ class SliceManagerPage(QWidget):
         toolbar.addWidget(install)
         self.catalog_status = QLabel("")
         self.catalog_status.setObjectName("subtitle")
-        self.available = QTreeWidget()
+        self.available = DeselectableTreeWidget()
         self.available.setHeaderLabels(["Slice", "Version", "Category", "Source", "Status"])
-        self.available.header().setSectionResizeMode(QHeaderView.ResizeToContents)
+        self.available.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.available.header().setSectionResizeMode(QHeaderView.Interactive)
         self.available.header().setStretchLastSection(True)
         layout.addLayout(toolbar)
         layout.addWidget(self.catalog_status)
@@ -215,11 +228,11 @@ class SliceManagerPage(QWidget):
         toolbar.addWidget(export_copy)
         toolbar.addWidget(import_profile)
         toolbar.addStretch()
-        self.sources = QTreeWidget()
+        self.sources = DeselectableTreeWidget()
         self.sources.setHeaderLabels(["Source", "Repository URL", "Branch", "Access"])
-        self.sources.header().setSectionResizeMode(QHeaderView.ResizeToContents)
+        self.sources.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.sources.header().setSectionResizeMode(QHeaderView.Interactive)
         self.sources.header().setStretchLastSection(True)
-        self.sources.itemChanged.connect(self.source_enabled_changed)
         layout.addLayout(toolbar)
         layout.addWidget(self.sources)
 
@@ -230,6 +243,8 @@ class SliceManagerPage(QWidget):
             row = QTreeWidgetItem([manifest.name, manifest.version, manifest.category, origin])
             row.setData(0, Qt.UserRole, manifest)
             self.installed.addTopLevelItem(row)
+        for column in range(self.installed.columnCount()):
+            self.installed.resizeColumnToContents(column)
 
     def refresh_available(self) -> None:
         self.refresh_button.setEnabled(False)
@@ -259,30 +274,40 @@ class SliceManagerPage(QWidget):
                 status = compatibility.reason
             row = QTreeWidgetItem([item.name, item.version, item.category, item.source_id, status])
             row.setData(0, Qt.UserRole, item.id)
-            if (item.id in installed and status != "Update available") or not compatibility.compatible:
+            if not compatibility.compatible:
                 row.setDisabled(True)
             self.available.addTopLevelItem(row)
         if refresh.errors:
             self.catalog_status.setText("Using cached data where needed: " + " | ".join(refresh.errors))
         else:
             self.catalog_status.setText(f"{len(items)} Slices available")
+        for column in range(self.available.columnCount()):
+            self.available.resizeColumnToContents(column)
         self.library_changed.emit()
 
     def refresh_sources(self) -> None:
-        self.sources.blockSignals(True)
         self.sources.clear()
         for source in self.backend.context.sources.load():
             access = "Private" if source.credential else "Public"
-            row = QTreeWidgetItem([source.name, source.repository_url, source.reference, access])
+            row = QTreeWidgetItem(["", source.repository_url, source.reference, access])
             row.setData(0, Qt.UserRole, source.id)
-            row.setFlags(row.flags() | Qt.ItemIsUserCheckable)
-            row.setCheckState(0, Qt.Checked if source.enabled else Qt.Unchecked)
             self.sources.addTopLevelItem(row)
-        self.sources.blockSignals(False)
+            enabled = IconCheckBox(source.name, source.enabled)
+            enabled.setAccessibleName(f"Enable {source.name}")
+            enabled.clicked.connect(lambda checked, item=row: self.sources.setCurrentItem(item))
+            enabled.clicked.connect(
+                lambda checked, source_id=source.id: self.backend.set_source_enabled(source_id, checked)
+            )
+            row.setSizeHint(0, enabled.sizeHint())
+            self.sources.setItemWidget(row, 0, enabled)
+        for column in range(self.sources.columnCount()):
+            self.sources.resizeColumnToContents(column)
 
     def install_selected(self) -> None:
         selected = self.available.currentItem()
         if selected is None or selected.isDisabled():
+            return
+        if selected.text(4) == "Installed":
             return
         item = self.available_items[str(selected.data(0, Qt.UserRole))]
         self.catalog_status.setText(f"Installing {item.name}…")
@@ -377,29 +402,31 @@ class SliceManagerPage(QWidget):
             return
         self.refresh_sources()
 
-    def source_enabled_changed(self, item: QTreeWidgetItem) -> None:
-        self.backend.set_source_enabled(str(item.data(0, Qt.UserRole)), item.checkState(0) == Qt.Checked)
-
     def export_portable_copy(self) -> None:
+        exported_at = time.time_ns() // 1_000_000
         destination, _ = QFileDialog.getSaveFileName(
             self,
             "Export Portable Copy",
-            "DoPie-portable.zip",
+            f"DoPie-portable-{exported_at}.zip",
             "ZIP archive (*.zip)",
         )
         if not destination:
             return
-        include_slices = (
-            QMessageBox.question(self, "Export Portable Copy", "Include installed Slices?") == QMessageBox.Yes
-        )
-        include_runtime = (
-            QMessageBox.question(
-                self,
-                "Export Portable Copy",
-                "Include the downloaded runtime for this operating system?",
+        destination_path = Path(destination)
+        if not destination_path.stem.endswith(f"-{exported_at}"):
+            destination_path = destination_path.with_name(
+                f"{destination_path.stem}-{exported_at}{destination_path.suffix or '.zip'}"
             )
-            == QMessageBox.Yes
+        target_platform, accepted = QInputDialog.getItem(
+            self,
+            "Export Portable Copy",
+            "Export launch scripts for",
+            ("Linux", "Windows", "Both"),
+            0,
+            False,
         )
+        if not accepted:
+            return
         password = None
         if self.backend.context.paths.vault.exists():
             password, accepted = QInputDialog.getText(
@@ -421,7 +448,9 @@ class SliceManagerPage(QWidget):
                 return
         try:
             PortableProfileService(self.backend.context.paths).export_portable_copy(
-                Path(destination), include_slices, include_runtime, password
+                destination_path,
+                target_platform.lower(),
+                password,
             )
         except Exception as error:
             QMessageBox.critical(self, "Portable copy export failed", str(error))

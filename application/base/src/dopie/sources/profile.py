@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import shutil
-import sys
 import tempfile
 import zipfile
 from pathlib import Path
@@ -19,7 +18,6 @@ class PortableProfileService:
     def export_portable_profile(
         self,
         destination: Path,
-        include_slices: bool = True,
         password: str | None = None,
     ) -> None:
         private_sources = self.paths.vault.exists()
@@ -28,7 +26,6 @@ class PortableProfileService:
         manifest = {
             "format": "dopie-portable-profile",
             "version": 2,
-            "includes_slices": include_slices,
             "private_sources": private_sources,
         }
         with zipfile.ZipFile(destination, "w", compression=zipfile.ZIP_DEFLATED) as archive:
@@ -53,30 +50,23 @@ class PortableProfileService:
                 )
             }
             archive.writestr("data/preferences.json", json.dumps(portable_settings, indent=2))
-            if include_slices:
-                for path in self.paths.installed_slices.rglob("*"):
-                    if path.is_file():
-                        archive.write(path, Path("data/slices") / path.relative_to(self.paths.installed_slices))
-
     def export_portable_copy(
         self,
         destination: Path,
-        include_slices: bool = True,
-        include_runtime: bool = False,
+        target_platform: str,
         password: str | None = None,
     ) -> None:
         with tempfile.TemporaryDirectory(prefix="dopie-export-", dir=self.paths.data) as temporary:
             profile = Path(temporary) / "DoPie.dopie-profile"
-            self.export_portable_profile(profile, include_slices, password)
+            self.export_portable_profile(profile, password=password)
             with zipfile.ZipFile(destination, "w", compression=zipfile.ZIP_DEFLATED) as archive:
                 archive.write(profile, "DoPie/provisioning/DoPie.dopie-profile")
-                for name in (
-                    "README.md",
-                    "THIRD_PARTY_NOTICES.md",
-                    "LICENSE",
-                    "start-dopie.sh",
-                    "Start DoPie.vbs",
-                ):
+                launchers = {
+                    "linux": ("start-dopie.sh",),
+                    "windows": ("Start DoPie.vbs",),
+                    "both": ("start-dopie.sh", "Start DoPie.vbs"),
+                }[target_platform]
+                for name in ("THIRD_PARTY_NOTICES.md", *launchers):
                     path = self.paths.project / name
                     if path.exists():
                         archive.write(path, Path("DoPie") / name)
@@ -95,15 +85,12 @@ class PortableProfileService:
                             path,
                             Path("DoPie/application/base") / path.relative_to(self.paths.active_project),
                         )
-                directories = ["bootstrap"]
-                if include_runtime:
-                    directories.append("runtime/windows" if sys.platform == "win32" else "runtime/linux")
-                for name in directories:
-                    root = self.paths.project / name
-                    if not root.exists():
-                        continue
+                root = self.paths.project / "bootstrap"
+                if root.exists():
                     for path in root.rglob("*"):
                         if not path.is_file() or "__pycache__" in path.parts or path.suffix == ".pyc":
+                            continue
+                        if path.name == "Start DoPie.ps1" and target_platform == "linux":
                             continue
                         archive.write(path, Path("DoPie") / path.relative_to(self.paths.project))
 
@@ -163,10 +150,3 @@ class PortableProfileService:
                 temporary = destination.with_suffix(".importing")
                 shutil.copy2(imported, temporary)
                 temporary.replace(destination)
-            imported_slices = imported_data / "slices"
-            if imported_slices.exists():
-                for slice_root in imported_slices.iterdir():
-                    destination = self.paths.installed_slices / slice_root.name
-                    if destination.exists():
-                        shutil.rmtree(destination)
-                    shutil.copytree(slice_root, destination)

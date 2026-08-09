@@ -5,6 +5,8 @@ import json
 import sys
 from pathlib import Path
 
+import pytest
+
 
 def test_activates_prepared_application_version(tmp_path):
     path = Path(__file__).parents[1] / "bootstrap" / "bootstrap.py"
@@ -105,3 +107,23 @@ def test_failed_early_startup_rolls_back_but_clean_exit_does_not(tmp_path, monke
 
     assert module.main(tmp_path) == 0
     assert restored == []
+
+
+def test_prepare_only_builds_environment_without_launching_application(tmp_path, monkeypatch):
+    path = Path(__file__).parents[1] / "bootstrap" / "bootstrap.py"
+    spec = importlib.util.spec_from_file_location("dopie_bootstrap_prepare_only", path)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    application = tmp_path / "application" / "base"
+    application.mkdir(parents=True)
+    prepared: list[tuple[Path, Path]] = []
+    monkeypatch.setattr(module, "prepare_application_environment", lambda root, active: prepared.append((root, active)))
+    monkeypatch.setattr(
+        module,
+        "launch_application",
+        lambda root, active, python: pytest.fail("prepare-only mode launched the application"),
+    )
+
+    assert module.main(tmp_path, prepare_only=True) == 0
+    assert prepared == [(tmp_path, application)]

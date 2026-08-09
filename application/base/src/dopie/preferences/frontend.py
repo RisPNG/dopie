@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from PySide6.QtWidgets import (
-    QCheckBox,
     QComboBox,
     QDialog,
     QDialogButtonBox,
@@ -13,6 +12,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from dopie.components.frontend import IconCheckBox
 from dopie.models import SourceDefinition
 from dopie.preferences.backend import PreferencesBackend
 
@@ -30,7 +30,7 @@ class PreferencesDialog(QDialog):
         tabs.addTab(general, "General")
         tabs.addTab(updates, "Updates")
         general_form = QFormLayout(general)
-        self.include_available = QCheckBox("Include available Slices in Library")
+        self.include_available = IconCheckBox("Include available Slices in Library")
         self.theme = QComboBox()
         self.theme.addItem("Follow operating system", "system")
         self.theme.addItem("Light", "light")
@@ -39,7 +39,7 @@ class PreferencesDialog(QDialog):
         general_form.addRow("Appearance", self.theme)
         update_layout = QVBoxLayout(updates)
         update_form = QFormLayout()
-        self.check_updates = QCheckBox("Check for updates on launch")
+        self.check_updates = IconCheckBox("Check for updates on launch")
         self.check_updates.setToolTip("Check the configured repository for a newer DoPie revision after startup.")
         self.repository_url = QLineEdit()
         self.repository_url.setToolTip("The full GitHub or Forgejo repository URL containing the DoPie source.")
