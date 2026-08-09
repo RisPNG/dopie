@@ -5,8 +5,8 @@ import pytest
 from dopie.slices.discovery import SliceDiscovery
 
 MANIFEST = """
-id = "text-counter"
-name = "Text Counter"
+id = "demo-slice"
+name = "Demo Slice"
 version = "1.0.0"
 description = "Count text"
 entrypoint = "frontend:SliceWidget"
@@ -16,13 +16,13 @@ entrypoint = "frontend:SliceWidget"
 def test_discovers_bundled_and_installed_slices(tmp_path):
     bundled = tmp_path / "bundled"
     installed = tmp_path / "installed"
-    (bundled / "text_counter").mkdir(parents=True)
-    (bundled / "text_counter" / "slice.toml").write_text(MANIFEST, encoding="utf-8")
+    (bundled / "demo_slice").mkdir(parents=True)
+    (bundled / "demo_slice" / "slice.toml").write_text(MANIFEST, encoding="utf-8")
     installed.mkdir()
 
     manifests = SliceDiscovery(bundled, installed).discover_installed_slices()
 
-    assert [manifest.id for manifest in manifests] == ["text-counter"]
+    assert [manifest.id for manifest in manifests] == ["demo-slice"]
 
 
 def test_rejects_duplicate_slice_ids(tmp_path):
