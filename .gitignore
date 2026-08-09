@@ -209,9 +209,12 @@ tempCodeRunnerFile.py
 # PyPI configuration file
 .pypirc
 
-application/
+application/current.json
+application/current.tmp
+application/versions/
 data/
 environments/
+/provisioning/
 runtime/
 
 # Marimo

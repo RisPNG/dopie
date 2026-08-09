@@ -77,9 +77,10 @@ def test_first_update_check_compares_a_git_checkout_before_recording_its_baselin
 
 
 def test_update_check_refreshes_stale_state_from_an_advanced_git_checkout(tmp_path, monkeypatch):
-    project = tmp_path / "project"
-    project.mkdir()
-    project.joinpath(".git").mkdir()
+    checkout = tmp_path / "project"
+    project = checkout / "application" / "base"
+    project.mkdir(parents=True)
+    checkout.joinpath(".git").mkdir()
     project.joinpath("pyproject.toml").write_text(
         '[project]\nname = "dopie"\nversion = "0.1.0"\n',
         encoding="utf-8",
@@ -108,12 +109,12 @@ def test_prepares_application_update_without_touching_active_source(tmp_path, mo
     archive = BytesIO()
     with zipfile.ZipFile(archive, "w") as package:
         package.writestr(
-            "dopie-next/pyproject.toml",
+            "dopie-next/application/base/pyproject.toml",
             '[project]\nname = "dopie"\nversion = "0.2.0"\n',
         )
-        package.writestr("dopie-next/src/dopie/__init__.py", '__version__ = "0.2.0"\n')
-        package.writestr("dopie-next/src/dopie/application.py", "def main(): return 0\n")
-        package.writestr("dopie-next/requirements.lock", "")
+        package.writestr("dopie-next/application/base/src/dopie/__init__.py", '__version__ = "0.2.0"\n')
+        package.writestr("dopie-next/application/base/src/dopie/application.py", "def main(): return 0\n")
+        package.writestr("dopie-next/application/base/requirements.lock", "")
     monkeypatch.setattr(
         RemoteRepositoryClient,
         "download_repository_archive",

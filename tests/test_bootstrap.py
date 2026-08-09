@@ -28,6 +28,27 @@ def test_activates_prepared_application_version(tmp_path):
     assert not pending.exists()
 
 
+def test_uses_the_nested_base_application_before_the_first_update(tmp_path):
+    path = Path(__file__).parents[1] / "bootstrap" / "bootstrap.py"
+    spec = importlib.util.spec_from_file_location("dopie_bootstrap_base", path)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    base = tmp_path / "application" / "base"
+    base.mkdir(parents=True)
+
+    assert module.activate_prepared_update(tmp_path) == base
+
+    current = tmp_path / "application" / "current.json"
+    current.write_text(
+        json.dumps({"version": "0.1.0", "revision": "current", "path": str(tmp_path)}),
+        encoding="utf-8",
+    )
+
+    assert module.activate_prepared_update(tmp_path) == base
+    assert json.loads(current.read_text(encoding="utf-8"))["path"] == str(base)
+
+
 def test_restores_previous_application_after_failed_startup(tmp_path):
     path = Path(__file__).parents[1] / "bootstrap" / "bootstrap.py"
     spec = importlib.util.spec_from_file_location("dopie_bootstrap_rollback", path)

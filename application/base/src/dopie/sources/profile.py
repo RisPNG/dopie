@@ -69,21 +69,33 @@ class PortableProfileService:
             profile = Path(temporary) / "DoPie.dopie-profile"
             self.export_portable_profile(profile, include_slices, password)
             with zipfile.ZipFile(destination, "w", compression=zipfile.ZIP_DEFLATED) as archive:
-                archive.write(profile, "DoPie/DoPie.dopie-profile")
+                archive.write(profile, "DoPie/provisioning/DoPie.dopie-profile")
                 for name in (
                     "README.md",
                     "THIRD_PARTY_NOTICES.md",
                     "LICENSE",
-                    "pyproject.toml",
-                    "requirements.lock",
-                    "portable.toml",
                     "start-dopie.sh",
                     "Start DoPie.vbs",
                 ):
                     path = self.paths.project / name
                     if path.exists():
                         archive.write(path, Path("DoPie") / name)
-                directories = ["assets", "bootstrap", "changelog", "docs", "slices", "src"]
+                for name in ("pyproject.toml", "requirements.lock"):
+                    path = self.paths.active_project / name
+                    if path.exists():
+                        archive.write(path, Path("DoPie/application/base") / name)
+                for name in ("assets", "changelog", "docs", "slices", "src"):
+                    root = self.paths.active_project / name
+                    if not root.exists():
+                        continue
+                    for path in root.rglob("*"):
+                        if not path.is_file() or "__pycache__" in path.parts or path.suffix == ".pyc":
+                            continue
+                        archive.write(
+                            path,
+                            Path("DoPie/application/base") / path.relative_to(self.paths.active_project),
+                        )
+                directories = ["bootstrap"]
                 if include_runtime:
                     directories.append("runtime/windows" if sys.platform == "win32" else "runtime/linux")
                 for name in directories:

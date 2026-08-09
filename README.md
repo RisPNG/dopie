@@ -1,6 +1,6 @@
 # DoPie
 
-<img src="assets/dopie.png" alt="DoPie logo" width="160">
+<img src="application/base/assets/dopie.png" alt="DoPie logo" width="160">
 
 DoPie is a Python-based UI shell for Python developers to write scripts without building a frontend from scratch.
 
@@ -12,9 +12,9 @@ The Pie owns the Library, Favorites, Slice Manager, trusted Sources, private cre
 
 ```bash
 mise install
-mise exec -- python -m pip install -e '.[dev]'
-mise exec -- pytest
-mise exec -- dopie
+mise exec -- python -m pip install -e 'application/base[dev]'
+mise run test
+./start-dopie.sh
 ```
 
 ## Portable launch
@@ -27,8 +27,8 @@ DoPie keeps all persistent state inside its own folder. That state includes Sour
 
 Configure the Sources on your copy, open **Slice Manager → Sources**, and select **Export Portable Copy**. Choose whether to include installed Slices and the already-downloaded runtime. A copy containing private Sources asks you to choose a transfer password; public-only copies do not need one.
 
-Extract the resulting ZIP and transfer its `DoPie` folder. On that copy's first launch, DoPie imports the bundled profile automatically. Private Sources request the transfer password once, then DoPie creates a new encrypted key inside that portable folder and records the imported profile there. Later launches do not ask again. Replacing `DoPie.dopie-profile` with a different profile triggers authorization for the new profile.
+Extract the resulting ZIP and transfer its `DoPie` folder. On that copy's first launch, DoPie imports `provisioning/DoPie.dopie-profile` automatically. Private Sources request the transfer password once, then DoPie creates a new encrypted key inside that portable folder, records the imported profile, and deletes the one-time provisioning file. An incorrect password imports nothing and leaves the profile available for another attempt.
 
 The Linux taskbar icon temporarily requires `dopie.desktop` in the current user's application directory. DoPie removes a stale entry on startup, recreates it while running, and removes it during normal shutdown. Update, profile, and Slice staging directories remain inside the DoPie folder.
 
-See [the Slice contract](docs/SLICES.md), and [the Source format](docs/SOURCES.md).
+See [the Slice contract](application/base/docs/SLICES.md), and [the Source format](application/base/docs/SOURCES.md).

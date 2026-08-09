@@ -13,7 +13,6 @@ from dopie.storage import SettingsStore, SourceStore
 
 def test_library_includes_available_slices_only_when_enabled(tmp_path, monkeypatch):
     monkeypatch.setenv("DOPIE_ROOT", str(tmp_path))
-    (tmp_path / "portable.toml").write_text('mode = "portable"', encoding="utf-8")
     bundled = tmp_path / "slices" / "local"
     bundled.mkdir(parents=True)
     bundled.joinpath("slice.toml").write_text(

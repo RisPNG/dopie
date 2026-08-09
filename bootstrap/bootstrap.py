@@ -13,6 +13,7 @@ from pathlib import Path
 
 def activate_prepared_update(root: Path) -> Path:
     application = root / "application"
+    base = application / "base"
     current_path = application / "current.json"
     pending_path = root / "data" / "updates" / "pending.json"
     if pending_path.exists():
@@ -26,13 +27,14 @@ def activate_prepared_update(root: Path) -> Path:
         if current_path.exists():
             previous = json.loads(current_path.read_text(encoding="utf-8"))
         else:
-            project_file = root / "pyproject.toml"
+            previous_path = base if base.exists() else root
+            project_file = previous_path / "pyproject.toml"
             if project_file.exists():
                 with project_file.open("rb") as stream:
                     previous_version = str(tomllib.load(stream)["project"]["version"])
             else:
                 previous_version = "unknown"
-            previous = {"version": previous_version, "revision": None, "path": str(root)}
+            previous = {"version": previous_version, "revision": None, "path": str(previous_path)}
         current = {
             "version": pending["version"],
             "revision": pending["revision"],
@@ -42,8 +44,14 @@ def activate_prepared_update(root: Path) -> Path:
         current_path.write_text(json.dumps(current, indent=2), encoding="utf-8")
         pending_path.unlink()
     if current_path.exists():
-        return Path(json.loads(current_path.read_text(encoding="utf-8"))["path"])
-    return root
+        current = json.loads(current_path.read_text(encoding="utf-8"))
+        selected = Path(current["path"])
+        if not (selected / "requirements.lock").exists() and base.exists():
+            current["path"] = str(base)
+            current_path.write_text(json.dumps(current, indent=2), encoding="utf-8")
+            selected = base
+        return selected
+    return base if base.exists() else root
 
 
 def prepare_application_environment(root: Path, application: Path) -> Path:

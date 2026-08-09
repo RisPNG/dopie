@@ -21,7 +21,7 @@ class ProvisioningBackend:
         self.paths = paths
 
     def pending_provisioning(self) -> PendingProvisioning | None:
-        profile = self.paths.project / "DoPie.dopie-profile"
+        profile = self.paths.project / "provisioning" / "DoPie.dopie-profile"
         if not profile.exists():
             return None
         digest = hashlib.sha256(profile.read_bytes()).hexdigest()
@@ -42,6 +42,7 @@ class ProvisioningBackend:
 
     def apply_provisioning(self, pending: PendingProvisioning, password: str | None = None) -> None:
         PortableProfileService(self.paths).import_portable_profile(pending.profile, password)
+        pending.profile.unlink()
         receipt = self.paths.data / "provisioning.json"
         temporary = receipt.with_suffix(".tmp")
         temporary.write_text(json.dumps({"profile_sha256": pending.digest}, indent=2), encoding="utf-8")

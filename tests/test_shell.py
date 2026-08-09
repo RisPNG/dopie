@@ -21,7 +21,6 @@ from dopie.theme import ThemeController
 def test_shell_builds_all_primary_pages_offscreen(tmp_path, monkeypatch):
     monkeypatch.setenv("QT_QPA_PLATFORM", "offscreen")
     monkeypatch.setenv("DOPIE_ROOT", str(tmp_path))
-    (tmp_path / "portable.toml").write_text('mode="portable"', encoding="utf-8")
     bundled = tmp_path / "slices" / "local"
     bundled.mkdir(parents=True)
     bundled.joinpath("slice.toml").write_text(
@@ -34,7 +33,10 @@ def test_shell_builds_all_primary_pages_offscreen(tmp_path, monkeypatch):
     )
     assets = tmp_path / "assets"
     assets.mkdir()
-    shutil.copy2(Path(__file__).parents[1] / "assets" / "dopie.png", assets / "dopie.png")
+    shutil.copy2(
+        Path(__file__).parents[1] / "application" / "base" / "assets" / "dopie.png",
+        assets / "dopie.png",
+    )
     (tmp_path / "changelog").mkdir()
     paths = resolve_app_paths()
     context = ApplicationContext(

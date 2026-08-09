@@ -29,9 +29,17 @@ class ApplicationUpdateService:
         if self.state.exists():
             recorded_revision = json.loads(self.state.read_text(encoding="utf-8")).get("revision")
         installed_revision = recorded_revision
-        if (self.active_application / ".git").exists() and shutil.which("git"):
+        checkout = next(
+            (
+                path
+                for path in (self.active_application, *self.active_application.parents)
+                if (path / ".git").exists()
+            ),
+            None,
+        )
+        if checkout is not None and shutil.which("git"):
             installed_revision = subprocess.run(
-                ["git", "-C", str(self.active_application), "rev-parse", "HEAD"],
+                ["git", "-C", str(checkout), "rev-parse", "HEAD"],
                 check=True,
                 capture_output=True,
                 text=True,

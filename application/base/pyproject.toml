@@ -6,9 +6,9 @@ build-backend = "hatchling.build"
 name = "dopie"
 version = "0.1.0"
 description = "A cross-platform Python desktop shell for Slices"
-readme = "README.md"
+readme = { text = "DoPie is a source-run desktop platform for focused Python automation Slices.", content-type = "text/markdown" }
 requires-python = ">=3.11"
-license = { file = "LICENSE" }
+license = { text = "MIT" }
 dependencies = [
     "cryptography>=45",
     "packaging>=24",
@@ -27,6 +27,9 @@ line-length = 120
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP"]
 
+[tool.ruff.lint.isort]
+known-first-party = ["dopie"]
+
 [project.scripts]
 dopie = "dopie.application:main"
 
@@ -35,4 +38,3 @@ packages = ["src/dopie"]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]
-testpaths = ["tests"]

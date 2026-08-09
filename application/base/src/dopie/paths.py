@@ -25,8 +25,13 @@ class AppPaths:
 
 
 def resolve_app_paths() -> AppPaths:
-    project = Path(os.environ.get("DOPIE_ROOT", Path(__file__).resolve().parents[2])).resolve()
-    active_project = Path(os.environ.get("DOPIE_ACTIVE_ROOT", project)).resolve()
+    source_project = Path(__file__).resolve().parents[2]
+    default_project = source_project.parents[1] if source_project.name == "base" else source_project
+    project = Path(os.environ.get("DOPIE_ROOT", default_project)).resolve()
+    default_active_project = project / "application" / "base"
+    if not default_active_project.exists():
+        default_active_project = project
+    active_project = Path(os.environ.get("DOPIE_ACTIVE_ROOT", default_active_project)).resolve()
     portable = True
     data = project / "data"
     data.mkdir(parents=True, exist_ok=True)

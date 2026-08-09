@@ -10,7 +10,7 @@ from dopie.paths import resolve_app_paths
 def test_application_logo_is_a_valid_qt_icon(monkeypatch):
     monkeypatch.setenv("QT_QPA_PLATFORM", "offscreen")
     application = QApplication.instance() or QApplication([])
-    logo = Path(__file__).parents[1] / "assets" / "dopie.png"
+    logo = Path(__file__).parents[1] / "application" / "base" / "assets" / "dopie.png"
 
     assert application is not None
     assert logo.is_file()
