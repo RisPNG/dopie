@@ -68,6 +68,7 @@ def prepare_application_environment(root: Path, application: Path) -> Path:
                 "pip",
                 "install",
                 "--disable-pip-version-check",
+                "--no-cache-dir",
                 "--require-hashes",
                 "-r",
                 str(lock),
@@ -102,8 +103,8 @@ def restore_previous_application(root: Path) -> Path | None:
     return Path(previous["path"])
 
 
-def main() -> int:
-    root = Path(__file__).resolve().parent.parent
+def main(root: Path | None = None) -> int:
+    root = root or Path(__file__).resolve().parent.parent
     application = activate_prepared_update(root)
     try:
         python = prepare_application_environment(root, application)
@@ -114,7 +115,7 @@ def main() -> int:
             raise
         python = prepare_application_environment(root, previous)
         return launch_application(root, previous, python)[0]
-    if healthy:
+    if returncode == 0 or healthy:
         return returncode
     previous = restore_previous_application(root)
     if previous is None:

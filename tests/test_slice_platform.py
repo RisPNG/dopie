@@ -32,6 +32,23 @@ def test_standard_slice_gets_an_isolated_environment_without_dependencies(tmp_pa
     assert plan.python != manifest.path
 
 
+def test_slice_dependency_install_does_not_use_the_user_cache(tmp_path):
+    slice_root = tmp_path / "slice"
+    slice_root.mkdir()
+    manifest_path = slice_root / "slice.toml"
+    manifest_path.write_text(
+        'id="safe"\nname="Safe"\nversion="1.0.0"\ndescription="Safe"\ninterface="standard"\noperation="backend:run"',
+        encoding="utf-8",
+    )
+    slice_root.joinpath("requirements.lock").write_text("", encoding="utf-8")
+
+    plan = SliceEnvironmentManager(tmp_path / "environments").prepare_slice_environment(
+        SliceManifest.load(manifest_path)
+    )
+
+    assert "--no-cache-dir" in plan.commands[1]
+
+
 def test_slice_assets_are_downloaded_and_verified(tmp_path):
     payload = b"trusted asset"
     source = tmp_path / "source.bin"
@@ -64,7 +81,7 @@ def test_installer_keeps_versions_and_can_roll_back(tmp_path, monkeypatch):
         lambda self, url: packages[url.rsplit("/", 1)[-1]],
     )
     installer = SliceInstaller(tmp_path / "installed")
-    source = SourceDefinition("source", "Source", "github", "owner/repository")
+    source = SourceDefinition("source", "Source", "https://github.com/owner/repository")
     for version in packages:
         payload = packages[version]
         item = CatalogSlice(
@@ -133,5 +150,5 @@ def test_installer_rejects_catalog_identity_mismatch(tmp_path, monkeypatch):
 
     with pytest.raises(ValueError, match="identity"):
         SliceInstaller(tmp_path / "installed").install_slice(
-            item, SourceDefinition("source", "Source", "github", "owner/repository")
+            item, SourceDefinition("source", "Source", "https://github.com/owner/repository")
         )

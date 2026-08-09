@@ -1,10 +1,15 @@
 from __future__ import annotations
 
+import shutil
+from pathlib import Path
+
 from PySide6.QtCore import QPoint
-from PySide6.QtWidgets import QAbstractItemView, QApplication
+from PySide6.QtWidgets import QAbstractItemView, QApplication, QHeaderView, QLabel
 
 from dopie.context import ApplicationContext, VaultSession
 from dopie.paths import resolve_app_paths
+from dopie.preferences.backend import PreferencesBackend
+from dopie.preferences.frontend import PreferencesDialog
 from dopie.security.vault import VaultStore
 from dopie.shell.frontend import MainWindow
 from dopie.slices.discovery import SliceDiscovery
@@ -27,13 +32,16 @@ def test_shell_builds_all_primary_pages_offscreen(tmp_path, monkeypatch):
         "def run(inputs, progress, log): return inputs\n",
         encoding="utf-8",
     )
+    assets = tmp_path / "assets"
+    assets.mkdir()
+    shutil.copy2(Path(__file__).parents[1] / "assets" / "dopie.png", assets / "dopie.png")
     (tmp_path / "changelog").mkdir()
     paths = resolve_app_paths()
     context = ApplicationContext(
         paths,
         SettingsStore(paths.settings),
         SourceStore(paths.sources),
-        VaultSession(VaultStore(paths.vault)),
+        VaultSession(VaultStore(paths.vault, paths.vault_key)),
         SliceDiscovery(paths.bundled_slices, paths.installed_slices),
         SliceInstaller(paths.installed_slices),
     )
@@ -46,11 +54,14 @@ def test_shell_builds_all_primary_pages_offscreen(tmp_path, monkeypatch):
     assert window.pages.count() == 3
     assert window.pages.indexOf(window.changelog) == -1
     assert window.library.grid.selectionMode() == QAbstractItemView.NoSelection
+    for table in (window.manager.installed, window.manager.available, window.manager.sources):
+        assert table.header().sectionResizeMode(0) == QHeaderView.ResizeToContents
+        assert table.header().stretchLastSection()
     assert window.topbar.parent() is not None
+    assert not window.findChild(QLabel, "brandIcon").pixmap().isNull()
     assert window.menu_button.parent() is window.topbar
     assert window.menu_button.text() == "☰"
     assert window.menu_button.menu() is not None
-    assert window.vault_lock_timer.isActive()
     window.show()
     application.processEvents()
     window.menu_button.click()
@@ -60,6 +71,11 @@ def test_shell_builds_all_primary_pages_offscreen(tmp_path, monkeypatch):
         <= window.menu_button.mapToGlobal(QPoint(window.menu_button.width(), 0)).x()
     )
     window.menu_button.menu().hide()
+    preferences = PreferencesDialog(PreferencesBackend(context), window)
+    assert not hasattr(preferences, "public_key")
+    assert not hasattr(preferences, "vault_password")
+    assert not hasattr(preferences, "confirm_vault_password")
+    preferences.close()
     window.open_slice(window.library.backend.build_library()[0])
     workspace = window.pages.currentWidget()
     workspace.close_requested.emit()

@@ -1,10 +1,28 @@
 from __future__ import annotations
 
+import copy
 import json
 from pathlib import Path
 from typing import Any
 
 from dopie.models import SourceDefinition
+
+DEFAULT_SETTINGS = {
+    "theme": "system",
+    "include_available_in_library": False,
+    "check_updates_on_launch": True,
+    "last_seen_version": None,
+    "favorites": [],
+    "recently_used": [],
+    "application_update_source": {
+        "id": "dopie-application",
+        "name": "DoPie Application",
+        "repository_url": "https://github.com/RisPNG/dopie",
+        "reference": "main",
+        "index": "index.json",
+        "credential": None,
+    },
+}
 
 
 class SettingsStore:
@@ -12,14 +30,10 @@ class SettingsStore:
         self.path = path
 
     def load(self) -> dict[str, Any]:
-        if not self.path.exists():
-            return {
-                "include_available_in_library": False,
-                "check_updates_on_launch": True,
-                "last_seen_version": None,
-                "favorites": [],
-            }
-        return json.loads(self.path.read_text(encoding="utf-8"))
+        stored = json.loads(self.path.read_text(encoding="utf-8")) if self.path.exists() else {}
+        settings = copy.deepcopy(DEFAULT_SETTINGS)
+        settings.update(stored)
+        return settings
 
     def save(self, settings: dict[str, Any]) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -42,13 +56,10 @@ class SourceStore:
             {
                 "id": source.id,
                 "name": source.name,
-                "provider": source.provider,
-                "repository": source.repository,
+                "repository_url": source.repository_url,
                 "reference": source.reference,
                 "index": source.index,
-                "base_url": source.base_url,
                 "credential": source.credential,
-                "public_key": source.public_key,
                 "enabled": source.enabled,
             }
             for source in sources

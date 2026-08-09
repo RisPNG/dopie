@@ -1,60 +1,64 @@
 from __future__ import annotations
 
-import base64
-import hashlib
 import json
 import shutil
+import subprocess
 import tempfile
 import tomllib
 import zipfile
 from io import BytesIO
 from pathlib import Path
 
-from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
-
 from dopie.models import SourceDefinition
 from dopie.sources.remote import RemoteRepositoryClient
 
 
 class ApplicationUpdateService:
-    def __init__(self, updates: Path):
+    def __init__(self, updates: Path, state: Path, active_application: Path):
         self.updates = updates
+        self.state = state
+        self.active_application = active_application
 
     def check_for_update(
         self,
         source: SourceDefinition,
-        installed_revision: str | None,
         token: str | None = None,
     ) -> str | None:
         revision = RemoteRepositoryClient(source, token).resolve_revision()
-        self.authenticate_release(source, revision, token)
+        installed_revision = None
+        if self.state.exists():
+            installed_revision = json.loads(self.state.read_text(encoding="utf-8")).get("revision")
+        if installed_revision is None:
+            if (self.active_application / ".git").exists() and shutil.which("git"):
+                installed_revision = subprocess.run(
+                    ["git", "-C", str(self.active_application), "rev-parse", "HEAD"],
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                ).stdout.strip()
+            else:
+                installed_revision = revision
+            with (self.active_application / "pyproject.toml").open("rb") as stream:
+                version = str(tomllib.load(stream)["project"]["version"])
+            self.state.parent.mkdir(parents=True, exist_ok=True)
+            temporary = self.state.with_suffix(".tmp")
+            temporary.write_text(
+                json.dumps(
+                    {
+                        "version": version,
+                        "revision": installed_revision,
+                        "path": str(self.active_application),
+                    },
+                    indent=2,
+                ),
+                encoding="utf-8",
+            )
+            temporary.replace(self.state)
         return revision if revision != installed_revision else None
-
-    def authenticate_release(
-        self,
-        source: SourceDefinition,
-        revision: str,
-        token: str | None = None,
-    ) -> dict[str, str]:
-        if not source.public_key:
-            return {}
-        client = RemoteRepositoryClient(source, token)
-        manifest = client.read_repository_file("update.json", revision)
-        signature = client.read_repository_file("update.json.sig", revision)
-        Ed25519PublicKey.from_public_bytes(base64.b64decode(source.public_key)).verify(
-            base64.b64decode(signature.strip()), manifest
-        )
-        release = json.loads(manifest)
-        if release.get("revision") != revision or not release.get("sha256"):
-            raise ValueError("Signed update metadata does not match the resolved revision")
-        return {"revision": str(release["revision"]), "sha256": str(release["sha256"])}
 
     def prepare_update(self, source: SourceDefinition, revision: str, token: str | None = None) -> dict[str, str]:
         archive = RemoteRepositoryClient(source, token).download_repository_archive(revision)
-        release = self.authenticate_release(source, revision, token)
-        if release and hashlib.sha256(archive).hexdigest() != release["sha256"].removeprefix("sha256:"):
-            raise ValueError("Application update archive checksum verification failed")
-        with tempfile.TemporaryDirectory(prefix="dopie-update-") as temporary:
+        with tempfile.TemporaryDirectory(prefix="dopie-update-", dir=self.updates) as temporary:
             extracted = Path(temporary) / "archive"
             extracted.mkdir()
             with zipfile.ZipFile(BytesIO(archive)) as package:

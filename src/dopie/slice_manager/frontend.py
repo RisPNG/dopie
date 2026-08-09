@@ -1,21 +1,25 @@
 from __future__ import annotations
 
+import re
 from pathlib import Path
+from urllib.parse import urlparse
 
 from PySide6.QtCore import Qt, QThreadPool, Signal
 from PySide6.QtWidgets import (
-    QComboBox,
+    QCheckBox,
     QDialog,
     QDialogButtonBox,
     QFileDialog,
     QFormLayout,
     QHBoxLayout,
+    QHeaderView,
     QInputDialog,
     QLabel,
     QLineEdit,
     QMessageBox,
     QPushButton,
     QTabWidget,
+    QToolButton,
     QTreeWidget,
     QTreeWidgetItem,
     QVBoxLayout,
@@ -30,53 +34,95 @@ from dopie.sources.profile import PortableProfileService
 
 
 class SourceDialog(QDialog):
-    def __init__(self, parent: QWidget | None = None):
+    def __init__(self, parent: QWidget | None = None, source: SourceDefinition | None = None):
         super().__init__(parent)
-        self.setWindowTitle("Add Source")
+        self.existing = source
+        self.setWindowTitle("Edit Source" if source else "Add Source")
+        self.resize(560, 340)
         layout = QVBoxLayout(self)
         form = QFormLayout()
-        self.source_id = QLineEdit()
         self.name = QLineEdit()
-        self.provider = QComboBox()
-        self.provider.addItems(["GitHub", "Forgejo"])
-        self.base_url = QLineEdit()
-        self.base_url.setPlaceholderText("Required for Forgejo")
-        self.repository = QLineEdit()
-        self.repository.setPlaceholderText("owner/repository")
+        self.name.setPlaceholderText("Uses the repository name when empty")
+        self.name.setToolTip("Optional display name. When empty, DoPie uses the repository name.")
+        self.repository_url = QLineEdit()
+        self.repository_url.setPlaceholderText("https://github.com/owner/repository")
+        self.repository_url.setToolTip("The full GitHub or Forgejo repository URL containing the Slice catalogue.")
         self.reference = QLineEdit("main")
+        self.reference.setToolTip("The repository branch containing the catalogue and Slice packages.")
         self.index = QLineEdit("index.json")
+        self.index.setToolTip(
+            "The catalogue file DoPie reads to discover available Slices. "
+            "Keep index.json unless the Source stores it elsewhere."
+        )
+        form.addRow("Name", self.name)
+        form.addRow("Repository URL", self.repository_url)
+        form.addRow("Branch", self.reference)
+        self.advanced_button = QToolButton()
+        self.advanced_button.setText("Advanced")
+        self.advanced_button.setCheckable(True)
+        self.advanced_button.setArrowType(Qt.RightArrow)
+        self.advanced_button.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
+        self.advanced = QWidget()
+        self.advanced.setVisible(False)
+        advanced_form = QFormLayout(self.advanced)
+        advanced_form.setContentsMargins(0, 0, 0, 0)
+        self.source_id = QLineEdit()
+        self.source_id.setPlaceholderText("Generated from the repository name")
+        self.source_id.setToolTip("Optional stable local identifier using lowercase letters, numbers, and hyphens.")
         self.token = QLineEdit()
         self.token.setEchoMode(QLineEdit.Password)
-        self.public_key = QLineEdit()
-        self.public_key.setPlaceholderText("Optional base64 Ed25519 public key")
-        form.addRow("Source ID", self.source_id)
-        form.addRow("Name", self.name)
-        form.addRow("Provider", self.provider)
-        form.addRow("Base URL", self.base_url)
-        form.addRow("Repository", self.repository)
-        form.addRow("Branch", self.reference)
-        form.addRow("Index", self.index)
-        form.addRow("Access token", self.token)
-        form.addRow("Signing key", self.public_key)
+        self.token.setPlaceholderText(
+            "Leave blank to keep the saved token"
+            if source and source.credential
+            else "Optional for private repositories"
+        )
+        self.token.setToolTip("A repository-scoped personal access token, encrypted inside this DoPie folder.")
+        self.remove_token = QCheckBox("Remove saved access token")
+        self.remove_token.setVisible(bool(source and source.credential))
+        self.remove_token.toggled.connect(self.token.setDisabled)
+        advanced_form.addRow("Source ID", self.source_id)
+        advanced_form.addRow("Index", self.index)
+        advanced_form.addRow("Access token", self.token)
+        advanced_form.addRow(self.remove_token)
+        self.advanced_button.toggled.connect(self.advanced.setVisible)
+        self.advanced_button.toggled.connect(
+            lambda expanded: self.advanced_button.setArrowType(Qt.DownArrow if expanded else Qt.RightArrow)
+        )
         buttons = QDialogButtonBox(QDialogButtonBox.Cancel | QDialogButtonBox.Save)
         buttons.rejected.connect(self.reject)
         buttons.accepted.connect(self.accept)
         layout.addLayout(form)
+        layout.addWidget(self.advanced_button, 0, Qt.AlignLeft)
+        layout.addWidget(self.advanced)
+        layout.addStretch()
         layout.addWidget(buttons)
+        if source:
+            self.name.setText(source.name)
+            self.repository_url.setText(source.repository_url)
+            self.reference.setText(source.reference)
+            self.source_id.setText(source.id)
+            self.index.setText(source.index)
 
     def source_definition(self) -> SourceDefinition:
         token = self.token.text().strip()
-        source_id = self.source_id.text().strip()
+        repository_url = self.repository_url.text().strip()
+        repository_name = urlparse(repository_url).path.strip("/").rsplit("/", 1)[-1].removesuffix(".git")
+        source_id = self.source_id.text().strip() or re.sub(
+            r"[^a-z0-9]+", "-", (repository_name or "source").casefold()
+        ).strip("-")
+        if self.remove_token.isChecked():
+            credential = None
+        elif self.existing and self.existing.credential:
+            credential = self.existing.credential
+        else:
+            credential = f"source:{source_id}" if token else None
         return SourceDefinition(
             id=source_id,
-            name=self.name.text().strip(),
-            provider=self.provider.currentText().casefold(),
-            base_url=self.base_url.text().strip() or None,
-            repository=self.repository.text().strip(),
-            reference=self.reference.text().strip(),
-            index=self.index.text().strip(),
-            credential=f"source:{source_id}" if token else None,
-            public_key=self.public_key.text().strip() or None,
+            name=self.name.text().strip() or repository_name or "Source",
+            repository_url=repository_url,
+            reference=self.reference.text().strip() or "main",
+            index=self.index.text().strip() or "index.json",
+            credential=credential,
         )
 
 
@@ -113,6 +159,8 @@ class SliceManagerPage(QWidget):
         layout = QVBoxLayout(self.installed_tab)
         self.installed = QTreeWidget()
         self.installed.setHeaderLabels(["Slice", "Version", "Category", "Origin"])
+        self.installed.header().setSectionResizeMode(QHeaderView.ResizeToContents)
+        self.installed.header().setStretchLastSection(True)
         remove = QPushButton("Uninstall selected")
         remove.setObjectName("danger")
         remove.clicked.connect(self.uninstall_selected)
@@ -140,6 +188,8 @@ class SliceManagerPage(QWidget):
         self.catalog_status.setObjectName("subtitle")
         self.available = QTreeWidget()
         self.available.setHeaderLabels(["Slice", "Version", "Category", "Source", "Status"])
+        self.available.header().setSectionResizeMode(QHeaderView.ResizeToContents)
+        self.available.header().setStretchLastSection(True)
         layout.addLayout(toolbar)
         layout.addWidget(self.catalog_status)
         layout.addWidget(self.available)
@@ -153,44 +203,25 @@ class SliceManagerPage(QWidget):
         remove = QPushButton("Remove selected")
         remove.setObjectName("danger")
         remove.clicked.connect(self.remove_source)
-        lock = QPushButton("Lock private Sources")
-        lock.clicked.connect(self.lock_sources)
-        export_profile = QPushButton("Export Profile")
-        export_profile.clicked.connect(self.export_profile)
+        edit = QPushButton("Edit selected")
+        edit.clicked.connect(self.edit_source)
+        export_copy = QPushButton("Export Portable Copy")
+        export_copy.clicked.connect(self.export_portable_copy)
         import_profile = QPushButton("Import Profile")
         import_profile.clicked.connect(self.import_profile)
         toolbar.addWidget(add)
+        toolbar.addWidget(edit)
         toolbar.addWidget(remove)
-        toolbar.addWidget(export_profile)
+        toolbar.addWidget(export_copy)
         toolbar.addWidget(import_profile)
         toolbar.addStretch()
-        toolbar.addWidget(lock)
         self.sources = QTreeWidget()
-        self.sources.setHeaderLabels(["Source", "Provider", "Repository", "Branch", "Access"])
+        self.sources.setHeaderLabels(["Source", "Repository URL", "Branch", "Access"])
+        self.sources.header().setSectionResizeMode(QHeaderView.ResizeToContents)
+        self.sources.header().setStretchLastSection(True)
         self.sources.itemChanged.connect(self.source_enabled_changed)
         layout.addLayout(toolbar)
         layout.addWidget(self.sources)
-
-    def _ensure_private_sources_unlocked(self, create: bool = False) -> bool:
-        if self.backend.context.vault.secrets is not None:
-            return True
-        title = "Create Source vault" if create else "Unlock private Sources"
-        password, accepted = QInputDialog.getText(self, title, "Password", QLineEdit.Password)
-        if not accepted or not password:
-            return False
-        try:
-            if create:
-                confirmation, confirmed = QInputDialog.getText(self, title, "Confirm password", QLineEdit.Password)
-                if not confirmed or confirmation != password:
-                    QMessageBox.warning(self, title, "Passwords do not match.")
-                    return False
-                self.backend.context.vault.create_private_source_vault(password)
-            else:
-                self.backend.context.vault.unlock_private_sources(password)
-        except Exception:
-            QMessageBox.warning(self, title, "The vault could not be unlocked.")
-            return False
-        return True
 
     def refresh_installed(self) -> None:
         self.installed.clear()
@@ -201,9 +232,6 @@ class SliceManagerPage(QWidget):
             self.installed.addTopLevelItem(row)
 
     def refresh_available(self) -> None:
-        if any(source.credential for source in self.backend.context.sources.load()):
-            if not self._ensure_private_sources_unlocked():
-                return
         self.refresh_button.setEnabled(False)
         self.catalog_status.setText("Refreshing Sources…")
         task = BackgroundTask(self.backend.refresh_source_catalogs)
@@ -245,9 +273,7 @@ class SliceManagerPage(QWidget):
         self.sources.clear()
         for source in self.backend.context.sources.load():
             access = "Private" if source.credential else "Public"
-            if source.public_key:
-                access += ", signed"
-            row = QTreeWidgetItem([source.name, source.provider, source.repository, source.reference, access])
+            row = QTreeWidgetItem([source.name, source.repository_url, source.reference, access])
             row.setData(0, Qt.UserRole, source.id)
             row.setFlags(row.flags() | Qt.ItemIsUserCheckable)
             row.setCheckState(0, Qt.Checked if source.enabled else Qt.Unchecked)
@@ -259,9 +285,6 @@ class SliceManagerPage(QWidget):
         if selected is None or selected.isDisabled():
             return
         item = self.available_items[str(selected.data(0, Qt.UserRole))]
-        source = next(source for source in self.backend.context.sources.load() if source.id == item.source_id)
-        if source.credential and not self._ensure_private_sources_unlocked():
-            return
         self.catalog_status.setText(f"Installing {item.name}…")
         task = BackgroundTask(lambda: self.backend.install_catalog_slice(item))
         task.signals.completed.connect(lambda _: self.installation_completed(item))
@@ -317,27 +340,12 @@ class SliceManagerPage(QWidget):
         dialog = SourceDialog(self)
         if dialog.exec() != QDialog.Accepted:
             return
-        source = dialog.source_definition()
-        if not source.id or not source.name or not source.repository:
-            QMessageBox.warning(self, "Invalid Source", "Source ID, name, and repository are required.")
-            return
-        if source.provider == "forgejo" and not source.base_url:
-            QMessageBox.warning(self, "Invalid Source", "Forgejo Sources require a base URL.")
-            return
-        if (
-            not source.public_key
-            and QMessageBox.warning(
-                self,
-                "Unsigned Source",
-                "This Source has no signing key. Its catalogue cannot be authenticated. Add it anyway?",
-                QMessageBox.Yes | QMessageBox.No,
-            )
-            != QMessageBox.Yes
-        ):
+        try:
+            source = dialog.source_definition()
+        except ValueError as error:
+            QMessageBox.warning(self, "Invalid Source", str(error))
             return
         token = dialog.token.text().strip() or None
-        if token and not self._ensure_private_sources_unlocked(create=not self.backend.context.paths.vault.exists()):
-            return
         try:
             self.backend.add_source(source, token)
         except Exception as error:
@@ -350,39 +358,75 @@ class SliceManagerPage(QWidget):
         if selected is None:
             return
         source_id = str(selected.data(0, Qt.UserRole))
-        source = next(source for source in self.backend.context.sources.load() if source.id == source_id)
-        if source.credential and not self._ensure_private_sources_unlocked():
-            return
         self.backend.remove_source(source_id)
         self.refresh_sources()
 
-    def lock_sources(self) -> None:
-        self.backend.context.vault.lock_private_sources()
-        QMessageBox.information(self, "Private Sources", "Private Sources are locked.")
+    def edit_source(self) -> None:
+        selected = self.sources.currentItem()
+        if selected is None:
+            return
+        source_id = str(selected.data(0, Qt.UserRole))
+        source = next(source for source in self.backend.context.sources.load() if source.id == source_id)
+        dialog = SourceDialog(self, source)
+        if dialog.exec() != QDialog.Accepted:
+            return
+        try:
+            self.backend.update_source(source_id, dialog.source_definition(), dialog.token.text().strip() or None)
+        except Exception as error:
+            QMessageBox.critical(self, "Could not update Source", str(error))
+            return
+        self.refresh_sources()
 
     def source_enabled_changed(self, item: QTreeWidgetItem) -> None:
         self.backend.set_source_enabled(str(item.data(0, Qt.UserRole)), item.checkState(0) == Qt.Checked)
 
-    def export_profile(self) -> None:
+    def export_portable_copy(self) -> None:
         destination, _ = QFileDialog.getSaveFileName(
             self,
-            "Export Portable Profile",
-            "DoPie.dopie-profile",
-            "DoPie Profile (*.dopie-profile)",
+            "Export Portable Copy",
+            "DoPie-portable.zip",
+            "ZIP archive (*.zip)",
         )
         if not destination:
             return
         include_slices = (
-            QMessageBox.question(self, "Export Portable Profile", "Include installed Slices?") == QMessageBox.Yes
+            QMessageBox.question(self, "Export Portable Copy", "Include installed Slices?") == QMessageBox.Yes
         )
+        include_runtime = (
+            QMessageBox.question(
+                self,
+                "Export Portable Copy",
+                "Include the downloaded runtime for this operating system?",
+            )
+            == QMessageBox.Yes
+        )
+        password = None
+        if self.backend.context.paths.vault.exists():
+            password, accepted = QInputDialog.getText(
+                self,
+                "Protect Private Sources",
+                "Transfer password",
+                QLineEdit.Password,
+            )
+            if not accepted or not password:
+                return
+            confirmation, confirmed = QInputDialog.getText(
+                self,
+                "Protect Private Sources",
+                "Confirm transfer password",
+                QLineEdit.Password,
+            )
+            if not confirmed or password != confirmation:
+                QMessageBox.warning(self, "Protect Private Sources", "Transfer passwords do not match.")
+                return
         try:
-            PortableProfileService(self.backend.context.paths).export_portable_profile(
-                Path(destination), include_slices
+            PortableProfileService(self.backend.context.paths).export_portable_copy(
+                Path(destination), include_slices, include_runtime, password
             )
         except Exception as error:
-            QMessageBox.critical(self, "Profile export failed", str(error))
+            QMessageBox.critical(self, "Portable copy export failed", str(error))
             return
-        QMessageBox.information(self, "Portable Profile", "The portable profile was exported.")
+        QMessageBox.information(self, "Portable Copy", "The transferable DoPie ZIP was exported.")
 
     def import_profile(self) -> None:
         source, _ = QFileDialog.getOpenFileName(
@@ -400,12 +444,23 @@ class SliceManagerPage(QWidget):
         )
         if answer != QMessageBox.Yes:
             return
+        profile = PortableProfileService(self.backend.context.paths)
+        password = None
+        if profile.profile_requires_password(Path(source)):
+            password, accepted = QInputDialog.getText(
+                self,
+                "Authorize Private Sources",
+                "Transfer password",
+                QLineEdit.Password,
+            )
+            if not accepted or not password:
+                return
         try:
-            PortableProfileService(self.backend.context.paths).import_portable_profile(Path(source))
+            profile.import_portable_profile(Path(source), password)
         except Exception as error:
             QMessageBox.critical(self, "Profile import failed", str(error))
             return
-        self.backend.context.vault.lock_private_sources()
+        self.backend.context.vault.secrets = None
         self.refresh_sources()
         self.refresh_installed()
         self.library_changed.emit()

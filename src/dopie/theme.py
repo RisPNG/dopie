@@ -78,6 +78,7 @@ class ThemeController(QObject):
         palette.setColor(QPalette.Base, QColor(colors.surface))
         palette.setColor(QPalette.AlternateBase, QColor(colors.surface_hover))
         palette.setColor(QPalette.Text, QColor(colors.text))
+        palette.setColor(QPalette.PlaceholderText, QColor(colors.muted))
         palette.setColor(QPalette.Button, QColor(colors.surface))
         palette.setColor(QPalette.ButtonText, QColor(colors.text))
         palette.setColor(QPalette.Highlight, QColor(colors.accent))
@@ -136,6 +137,12 @@ class ThemeController(QObject):
                 border: 1px solid {colors.border};
                 border-radius: 7px;
                 padding: 7px;
+            }}
+            QComboBox QAbstractItemView {{
+                background: {colors.surface};
+                color: {colors.text};
+                selection-background-color: {colors.surface_hover};
+                selection-color: {colors.text};
             }}
             QTabWidget::pane {{ border: 1px solid {colors.border}; background: {colors.surface}; }}
             QTabBar::tab {{ padding: 9px 16px; }}

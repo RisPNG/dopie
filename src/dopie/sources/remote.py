@@ -3,7 +3,7 @@ from __future__ import annotations
 import base64
 import json
 from typing import Any
-from urllib.parse import quote
+from urllib.parse import quote, urlparse
 from urllib.request import Request, urlopen
 
 from dopie.models import SourceDefinition
@@ -67,7 +67,9 @@ class RemoteRepositoryClient:
 
     def download_artifact(self, url: str) -> bytes:
         headers = {"Accept": "application/octet-stream", "User-Agent": "DoPie"}
-        if self.token:
+        repository_host = urlparse(self.source.repository_url).hostname
+        allowed_hosts = {repository_host, "api.github.com"} if self.source.provider == "github" else {repository_host}
+        if self.token and urlparse(url).hostname in allowed_hosts:
             headers["Authorization"] = f"Bearer {self.token}"
         with urlopen(Request(url, headers=headers), timeout=120) as response:
             return response.read()

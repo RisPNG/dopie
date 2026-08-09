@@ -24,6 +24,22 @@ class SliceManagerBackend:
     def installed_slices(self) -> list[SliceManifest]:
         return self.context.discovery.discover_installed_slices()
 
+    def load_cached_catalogs(self) -> tuple[CatalogSlice, ...]:
+        available: dict[str, CatalogSlice] = {}
+        for source in self.context.sources.load():
+            cache = self.context.paths.catalog_cache / f"{source.id}.json"
+            if not source.enabled or not cache.exists():
+                continue
+            try:
+                cached_items = json.loads(cache.read_text(encoding="utf-8"))
+                for item in cached_items:
+                    catalog_slice = CatalogSlice.from_dict(item, source.id)
+                    available[catalog_slice.id] = catalog_slice
+            except (json.JSONDecodeError, KeyError, TypeError, ValueError):
+                continue
+        self.context.available = sorted(available.values(), key=lambda item: item.name.casefold())
+        return tuple(self.context.available)
+
     def refresh_source_catalogs(self) -> CatalogRefresh:
         available: dict[str, CatalogSlice] = {}
         errors: list[str] = []
@@ -34,14 +50,20 @@ class SliceManagerBackend:
             try:
                 token = self.context.vault.source_credential(source.credential)
                 items = SourceCatalog().fetch_available_slices(source, token)
-                cache.write_text(json.dumps([asdict(item) for item in items], indent=2), encoding="utf-8")
+                temporary = cache.with_suffix(".tmp")
+                temporary.write_text(json.dumps([asdict(item) for item in items], indent=2), encoding="utf-8")
+                temporary.replace(cache)
             except Exception as error:
                 errors.append(f"{source.name}: {error}")
                 if not cache.exists():
                     continue
-                items = [
-                    CatalogSlice.from_dict(item, source.id) for item in json.loads(cache.read_text(encoding="utf-8"))
-                ]
+                try:
+                    items = [
+                        CatalogSlice.from_dict(item, source.id)
+                        for item in json.loads(cache.read_text(encoding="utf-8"))
+                    ]
+                except (json.JSONDecodeError, KeyError, TypeError, ValueError):
+                    continue
             for item in items:
                 available[item.id] = item
         self.context.available = sorted(available.values(), key=lambda item: item.name.casefold())
@@ -89,18 +111,32 @@ class SliceManagerBackend:
                 SourceDefinition(
                     id=source.id,
                     name=source.name,
-                    provider=source.provider,
-                    repository=source.repository,
+                    repository_url=source.repository_url,
                     reference=source.reference,
                     index=source.index,
-                    base_url=source.base_url,
                     credential=source.credential,
-                    public_key=source.public_key,
                     enabled=enabled if source.id == source_id else source.enabled,
                 )
                 for source in sources
             ]
         )
+
+    def update_source(self, original_id: str, updated: SourceDefinition, token: str | None = None) -> None:
+        sources = self.context.sources.load()
+        original = next(source for source in sources if source.id == original_id)
+        if any(source.id == updated.id and source.id != original_id for source in sources):
+            raise ValueError(f"Source id already exists: {updated.id}")
+        if token and updated.credential:
+            self.context.vault.store_source_credential(updated.credential, token)
+        if original.credential and original.credential != updated.credential:
+            self.context.vault.remove_source_credential(original.credential)
+        self.context.sources.save([updated if source.id == original_id else source for source in sources])
+        if original_id != updated.id:
+            original_cache = self.context.paths.catalog_cache / f"{original_id}.json"
+            updated_cache = self.context.paths.catalog_cache / f"{updated.id}.json"
+            if original_cache.exists():
+                original_cache.replace(updated_cache)
+        self.load_cached_catalogs()
 
     def remove_source(self, source_id: str) -> None:
         sources = self.context.sources.load()

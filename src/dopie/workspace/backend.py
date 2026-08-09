@@ -43,6 +43,7 @@ class SliceEnvironmentManager:
                     "pip",
                     "install",
                     "--disable-pip-version-check",
+                    "--no-cache-dir",
                     "--require-hashes",
                     "-r",
                     str(lock),

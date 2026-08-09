@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import re
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 
 @dataclass(frozen=True)
@@ -82,27 +84,58 @@ class SliceManifest:
 class SourceDefinition:
     id: str
     name: str
-    provider: str
-    repository: str
+    repository_url: str
     reference: str = "main"
     index: str = "index.json"
-    base_url: str | None = None
     credential: str | None = None
-    public_key: str | None = None
     enabled: bool = True
+
+    def __post_init__(self) -> None:
+        if re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", self.id) is None:
+            raise ValueError("Source ID must be a lowercase slug using letters, numbers, and hyphens")
+        parsed = urlparse(self.repository_url)
+        if (
+            parsed.scheme not in {"http", "https"}
+            or not parsed.netloc
+            or parsed.query
+            or parsed.fragment
+            or len(parsed.path.strip("/").split("/")) != 2
+        ):
+            raise ValueError("Repository URL must be an HTTP URL ending in owner/repository")
+
+    @property
+    def provider(self) -> str:
+        return "github" if urlparse(self.repository_url).hostname == "github.com" else "forgejo"
+
+    @property
+    def repository(self) -> str:
+        return urlparse(self.repository_url).path.strip("/").removesuffix(".git")
+
+    @property
+    def base_url(self) -> str:
+        parsed = urlparse(self.repository_url)
+        return f"{parsed.scheme}://{parsed.netloc}"
+
+    @property
+    def repository_name(self) -> str:
+        return self.repository.rsplit("/", 1)[-1]
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> SourceDefinition:
+        repository_url = data.get("repository_url")
+        if not repository_url:
+            repository = str(data["repository"])
+            if data.get("provider") == "github":
+                repository_url = f"https://github.com/{repository}"
+            else:
+                repository_url = f"{str(data['base_url']).rstrip('/')}/{repository}"
         return cls(
             id=str(data["id"]),
             name=str(data["name"]),
-            provider=str(data["provider"]),
-            repository=str(data["repository"]),
+            repository_url=str(repository_url),
             reference=str(data.get("reference", "main")),
             index=str(data.get("index", "index.json")),
-            base_url=str(data["base_url"]) if data.get("base_url") else None,
             credential=str(data["credential"]) if data.get("credential") else None,
-            public_key=str(data["public_key"]) if data.get("public_key") else None,
             enabled=bool(data.get("enabled", True)),
         )
 

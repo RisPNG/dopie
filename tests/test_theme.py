@@ -16,3 +16,5 @@ def test_light_and_dark_modes_apply_central_palette(monkeypatch):
     controller.set_mode("dark")
 
     assert application.palette().window().color() == QColor(DARK.window)
+    assert application.palette().placeholderText().color() == QColor(DARK.muted)
+    assert f"selection-color: {DARK.text}" in application.styleSheet()

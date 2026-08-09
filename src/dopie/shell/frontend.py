@@ -1,15 +1,13 @@
 from __future__ import annotations
 
-import json
 import sys
 
-from PySide6.QtCore import QEvent, QPoint, QProcess, Qt, QThreadPool, QTimer
+from PySide6.QtCore import QPoint, QProcess, Qt, QThreadPool, QTimer
+from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import (
     QApplication,
     QHBoxLayout,
-    QInputDialog,
     QLabel,
-    QLineEdit,
     QListWidget,
     QMainWindow,
     QMenu,
@@ -44,10 +42,6 @@ class MainWindow(QMainWindow):
         self.theme = theme
         self.thread_pool = QThreadPool.globalInstance()
         self.active_tasks: list[BackgroundTask] = []
-        self.vault_lock_timer = QTimer(self)
-        self.vault_lock_timer.setSingleShot(True)
-        self.vault_lock_timer.timeout.connect(self.context.vault.lock_private_sources)
-        QApplication.instance().installEventFilter(self)
         self.setWindowTitle("DoPie")
         self.resize(1180, 760)
         root = QWidget()
@@ -58,9 +52,26 @@ class MainWindow(QMainWindow):
         sidebar.setObjectName("sidebar")
         sidebar.setFixedWidth(230)
         sidebar_layout = QVBoxLayout(sidebar)
-        brand = QLabel("DoPie")
-        brand.setObjectName("title")
-        brand.setContentsMargins(12, 14, 12, 8)
+        brand = QWidget()
+        brand_layout = QHBoxLayout(brand)
+        brand_layout.setContentsMargins(12, 14, 12, 8)
+        brand_layout.setSpacing(10)
+        brand_icon = QLabel()
+        brand_icon.setObjectName("brandIcon")
+        brand_icon.setFixedSize(32, 32)
+        brand_icon.setPixmap(
+            QPixmap(str(context.paths.active_project / "assets" / "dopie.png")).scaled(
+                32,
+                32,
+                Qt.KeepAspectRatio,
+                Qt.SmoothTransformation,
+            )
+        )
+        brand_title = QLabel("DoPie")
+        brand_title.setObjectName("title")
+        brand_layout.addWidget(brand_icon)
+        brand_layout.addWidget(brand_title)
+        brand_layout.addStretch()
         self.navigation = QListWidget()
         self.navigation.setObjectName("navigation")
         self.navigation.addItems(["Library", "Favorites", "Slice Manager"])
@@ -130,19 +141,6 @@ class MainWindow(QMainWindow):
         QTimer.singleShot(0, self.show_changelog_after_update)
         if context.settings.load().get("check_updates_on_launch"):
             QTimer.singleShot(750, lambda: self.check_for_updates(False))
-        self.arm_vault_lock()
-
-    def eventFilter(self, watched: object, event: QEvent) -> bool:
-        if event.type() in {QEvent.MouseButtonPress, QEvent.KeyPress, QEvent.TouchBegin}:
-            self.arm_vault_lock()
-        return super().eventFilter(watched, event)
-
-    def arm_vault_lock(self) -> None:
-        minutes = int(self.context.settings.load().get("vault_lock_minutes", 15))
-        if minutes:
-            self.vault_lock_timer.start(minutes * 60 * 1000)
-        else:
-            self.vault_lock_timer.stop()
 
     def navigate(self, index: int) -> None:
         if index >= 0:
@@ -176,7 +174,6 @@ class MainWindow(QMainWindow):
         dialog = PreferencesDialog(PreferencesBackend(self.context), self)
         if dialog.exec():
             self.theme.set_mode(str(self.context.settings.load().get("theme", "system")))
-            self.arm_vault_lock()
             self.library.refresh()
 
     def show_changelog(self, previous: str | None) -> None:
@@ -193,7 +190,7 @@ class MainWindow(QMainWindow):
     def check_for_updates(self, interactive: bool = True) -> None:
         settings = self.context.settings.load()
         configured = settings.get("application_update_source", {})
-        if not configured.get("repository"):
+        if not configured.get("repository_url") and not configured.get("repository"):
             if interactive:
                 QMessageBox.information(
                     self,
@@ -202,29 +199,13 @@ class MainWindow(QMainWindow):
                 )
             return
         source = SourceDefinition.from_dict(configured)
-        token = None
-        if source.credential:
-            if self.context.vault.secrets is None:
-                password, accepted = QInputDialog.getText(
-                    self,
-                    "Unlock private Sources",
-                    "Password",
-                    QLineEdit.Password,
-                )
-                if not accepted:
-                    return
-                try:
-                    self.context.vault.unlock_private_sources(password)
-                except Exception:
-                    QMessageBox.warning(self, "Application updates", "The Source vault could not be unlocked.")
-                    return
-            token = self.context.vault.source_credential(source.credential)
-        state_path = self.context.paths.project / "application" / "current.json"
-        installed_revision = None
-        if state_path.exists():
-            installed_revision = json.loads(state_path.read_text(encoding="utf-8")).get("revision")
-        service = ApplicationUpdateService(self.context.paths.updates)
-        task = BackgroundTask(lambda: service.check_for_update(source, installed_revision, token))
+        token = self.context.vault.source_credential(source.credential)
+        service = ApplicationUpdateService(
+            self.context.paths.updates,
+            self.context.paths.project / "application" / "current.json",
+            self.context.paths.active_project,
+        )
+        task = BackgroundTask(lambda: service.check_for_update(source, token))
         task.signals.completed.connect(
             lambda revision: self.application_update_checked(revision, source, token, service, interactive)
         )

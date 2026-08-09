@@ -15,39 +15,25 @@ class VaultSession:
     def __init__(self, store: VaultStore):
         self.store = store
         self.secrets: dict[str, Any] | None = None
-        self.password: str | None = None
-
-    def unlock_private_sources(self, password: str) -> None:
-        self.secrets = self.store.unlock(password)
-        self.password = password
-
-    def create_private_source_vault(self, password: str) -> None:
-        self.secrets = {"credentials": {}}
-        self.password = password
-        self.store.seal(self.secrets, password)
 
     def store_source_credential(self, credential_id: str, token: str) -> None:
-        if self.secrets is None or self.password is None:
-            raise RuntimeError("Private Sources are locked")
+        if self.secrets is None:
+            self.secrets = self.store.unlock() if self.store.path.exists() else {"credentials": {}}
         self.secrets.setdefault("credentials", {})[credential_id] = token
-        self.store.seal(self.secrets, self.password)
+        self.store.seal(self.secrets)
 
     def source_credential(self, credential_id: str | None) -> str | None:
         if credential_id is None:
             return None
         if self.secrets is None:
-            raise RuntimeError("Private Sources are locked")
+            self.secrets = self.store.unlock()
         return str(self.secrets["credentials"][credential_id])
 
     def remove_source_credential(self, credential_id: str) -> None:
-        if self.secrets is None or self.password is None:
-            raise RuntimeError("Private Sources are locked")
+        if self.secrets is None:
+            self.secrets = self.store.unlock()
         self.secrets.get("credentials", {}).pop(credential_id, None)
-        self.store.seal(self.secrets, self.password)
-
-    def lock_private_sources(self) -> None:
-        self.secrets = None
-        self.password = None
+        self.store.seal(self.secrets)
 
 
 @dataclass

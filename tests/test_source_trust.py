@@ -1,47 +1,10 @@
 from __future__ import annotations
 
-import base64
-import json
+import zipfile
 
-from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
-from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
-
-from dopie.models import SourceDefinition
 from dopie.paths import resolve_app_paths
-from dopie.sources.catalog import SourceCatalog
+from dopie.security.vault import VaultStore
 from dopie.sources.profile import PortableProfileService
-from dopie.sources.remote import RemoteRepositoryClient
-
-
-def test_signed_source_catalog_is_verified(monkeypatch):
-    payload = json.dumps(
-        {
-            "slices": [
-                {
-                    "id": "tool",
-                    "name": "Tool",
-                    "version": "1.0.0",
-                    "description": "Tool",
-                    "download_url": "https://example.test/tool.zip",
-                    "sha256": "abc",
-                }
-            ]
-        }
-    ).encode()
-    private_key = Ed25519PrivateKey.generate()
-    signature = base64.b64encode(private_key.sign(payload))
-    public_key = base64.b64encode(private_key.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw)).decode()
-    monkeypatch.setattr(RemoteRepositoryClient, "resolve_revision", lambda self: "revision")
-    monkeypatch.setattr(
-        RemoteRepositoryClient,
-        "read_repository_file",
-        lambda self, path, revision=None: signature if path.endswith(".sig") else payload,
-    )
-    source = SourceDefinition("source", "Source", "github", "owner/repository", public_key=public_key)
-
-    items = SourceCatalog().fetch_available_slices(source)
-
-    assert [item.id for item in items] == ["tool"]
 
 
 def test_portable_profile_moves_encrypted_sources_and_installed_slices(tmp_path, monkeypatch):
@@ -53,17 +16,52 @@ def test_portable_profile_moves_encrypted_sources_and_installed_slices(tmp_path,
         (root / "portable.toml").write_text('mode="portable"', encoding="utf-8")
     monkeypatch.setenv("DOPIE_ROOT", str(source_root))
     source_paths = resolve_app_paths()
-    source_paths.sources.write_text('[{"id":"private"}]', encoding="utf-8")
-    source_paths.vault.write_bytes(b"encrypted-vault")
+    source_paths.sources.write_text(
+        '[{"id":"private","name":"Private","repository_url":"https://github.com/owner/private",'
+        '"credential":"source:private"}]',
+        encoding="utf-8",
+    )
+    source_vault = VaultStore(source_paths.vault, source_paths.vault_key)
+    source_vault.seal({"credentials": {"source:private": "token-value"}})
     installed = source_paths.installed_slices / "tool" / "versions" / "1.0.0"
     installed.mkdir(parents=True)
     installed.joinpath("slice.toml").write_text("installed", encoding="utf-8")
     profile = tmp_path / "portable.dopie-profile"
-    PortableProfileService(source_paths).export_portable_profile(profile)
+    PortableProfileService(source_paths).export_portable_profile(profile, password="transfer password")
 
     monkeypatch.setenv("DOPIE_ROOT", str(destination_root))
     destination_paths = resolve_app_paths()
-    PortableProfileService(destination_paths).import_portable_profile(profile)
+    service = PortableProfileService(destination_paths)
+    assert service.profile_requires_password(profile)
+    service.import_portable_profile(profile, "transfer password")
 
-    assert destination_paths.vault.read_bytes() == b"encrypted-vault"
+    assert VaultStore(destination_paths.vault, destination_paths.vault_key).unlock() == {
+        "credentials": {"source:private": "token-value"}
+    }
     assert (destination_paths.installed_slices / "tool" / "versions" / "1.0.0" / "slice.toml").exists()
+
+
+def test_portable_copy_contains_launchers_profile_and_no_local_state(tmp_path, monkeypatch):
+    root = tmp_path / "source"
+    root.mkdir()
+    for name in ("README.md", "LICENSE", "pyproject.toml", "requirements.lock", "portable.toml", "start-dopie.sh"):
+        root.joinpath(name).write_text(name, encoding="utf-8")
+    root.joinpath("Start DoPie.vbs").write_text("launcher", encoding="utf-8")
+    bootstrap = root / "bootstrap"
+    bootstrap.mkdir()
+    bootstrap.joinpath("bootstrap.py").write_text("bootstrap", encoding="utf-8")
+    monkeypatch.setenv("DOPIE_ROOT", str(root))
+    paths = resolve_app_paths()
+    paths.sources.write_text("[]", encoding="utf-8")
+    paths.data.joinpath("private-state").write_text("private", encoding="utf-8")
+    destination = tmp_path / "DoPie-portable.zip"
+
+    PortableProfileService(paths).export_portable_copy(destination, include_slices=False)
+
+    with zipfile.ZipFile(destination) as archive:
+        names = set(archive.namelist())
+    assert "DoPie/start-dopie.sh" in names
+    assert "DoPie/Start DoPie.vbs" in names
+    assert "DoPie/bootstrap/bootstrap.py" in names
+    assert "DoPie/DoPie.dopie-profile" in names
+    assert all("private-state" not in name for name in names)

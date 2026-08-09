@@ -1,5 +1,5 @@
 $ErrorActionPreference = "Stop"
-$Root = Split-Path -Parent $MyInvocation.MyCommand.Definition
+$Root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Definition)
 $RuntimeManifest = Get-Content (Join-Path $Root "bootstrap\runtime.json") -Raw | ConvertFrom-Json
 $Python = Join-Path (Join-Path $Root "runtime\windows") $RuntimeManifest.windows.python
 $Archive = Join-Path $Root "runtime\windows\MsPy.zip"

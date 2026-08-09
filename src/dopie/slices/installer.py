@@ -15,13 +15,14 @@ from dopie.sources.remote import RemoteRepositoryClient
 class SliceInstaller:
     def __init__(self, installed: Path):
         self.installed = installed
+        self.installed.mkdir(parents=True, exist_ok=True)
 
     def install_slice(self, item: CatalogSlice, source: SourceDefinition, token: str | None = None) -> None:
         archive = RemoteRepositoryClient(source, token).download_artifact(item.download_url)
         digest = hashlib.sha256(archive).hexdigest()
         if digest != item.sha256.removeprefix("sha256:"):
             raise ValueError(f"Checksum verification failed for {item.name}")
-        with tempfile.TemporaryDirectory(prefix="dopie-slice-") as temporary:
+        with tempfile.TemporaryDirectory(prefix="dopie-slice-", dir=self.installed) as temporary:
             staging = Path(temporary) / item.id
             staging.mkdir()
             with zipfile.ZipFile(BytesIO(archive)) as package:

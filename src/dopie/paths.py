@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import os
-import sys
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -19,6 +18,7 @@ class AppPaths:
     settings: Path
     sources: Path
     vault: Path
+    vault_key: Path
     updates: Path
     changelog: Path
     portable: bool
@@ -27,13 +27,8 @@ class AppPaths:
 def resolve_app_paths() -> AppPaths:
     project = Path(os.environ.get("DOPIE_ROOT", Path(__file__).resolve().parents[2])).resolve()
     active_project = Path(os.environ.get("DOPIE_ACTIVE_ROOT", project)).resolve()
-    portable = (project / "portable.toml").is_file()
-    if portable:
-        data = project / "data"
-    elif sys.platform == "win32":
-        data = Path(os.environ["APPDATA"]) / "DoPie"
-    else:
-        data = Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local" / "share")) / "dopie"
+    portable = True
+    data = project / "data"
     data.mkdir(parents=True, exist_ok=True)
     installed_slices = data / "slices"
     slice_environments = data / "slice-environments"
@@ -57,6 +52,7 @@ def resolve_app_paths() -> AppPaths:
         settings=data / "preferences.json",
         sources=data / "sources.json",
         vault=data / "source-vault.dopie",
+        vault_key=data / "source-vault.key",
         updates=updates,
         changelog=active_project / "changelog",
         portable=portable,
