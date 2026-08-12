@@ -128,6 +128,8 @@ class MainWindow(QMainWindow):
         self.favorites.open_slice.connect(self.open_slice)
         self.library.manage_slice.connect(self.manage_slice)
         self.favorites.manage_slice.connect(self.manage_slice)
+        self.library.update_slice.connect(self.manager.install_slice)
+        self.favorites.update_slice.connect(self.manager.install_slice)
         self.library.favorites_changed.connect(self.refresh_libraries)
         self.favorites.favorites_changed.connect(self.refresh_libraries)
         self.manager.library_changed.connect(self.library.refresh)
@@ -138,6 +140,14 @@ class MainWindow(QMainWindow):
         layout.addWidget(main, 1)
         self.setCentralWidget(root)
         self.navigation.setCurrentRow(0)
+        self.catalog_refresh_timer = QTimer(self)
+        self.catalog_refresh_timer.setInterval(15 * 60 * 1000)
+        self.catalog_refresh_timer.timeout.connect(self.refresh_catalogs_while_library_active)
+        self.catalog_refresh_timer.start()
+        application = QApplication.instance()
+        if application is not None:
+            application.applicationStateChanged.connect(self.application_state_changed)
+        QTimer.singleShot(0, lambda: self.manager.refresh_available_if_stale(15 * 60))
         QTimer.singleShot(0, self.show_changelog_after_update)
         if context.settings.load().get("check_updates_on_launch"):
             QTimer.singleShot(750, lambda: self.check_for_updates(False))
@@ -146,6 +156,16 @@ class MainWindow(QMainWindow):
         if index >= 0:
             self.section_title.setText(("Library", "Favorites", "Slice Manager")[index])
             self.pages.setCurrentIndex(index)
+            if self.isVisible() and index in {0, 1}:
+                self.manager.refresh_available_if_stale(15 * 60)
+
+    def refresh_catalogs_while_library_active(self) -> None:
+        if self.isActiveWindow() and self.pages.currentWidget() in {self.library, self.favorites}:
+            self.manager.refresh_available_if_stale(15 * 60)
+
+    def application_state_changed(self, state: Qt.ApplicationState) -> None:
+        if state == Qt.ApplicationActive and self.pages.currentWidget() in {self.library, self.favorites}:
+            self.manager.refresh_available_if_stale(15 * 60)
 
     def open_slice(self, item: object) -> None:
         self.library.backend.record_slice_opened(item.id)

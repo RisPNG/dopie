@@ -146,6 +146,9 @@ class SliceManagerPage(QWidget):
         self.available_items: dict[str, CatalogSlice] = {}
         self.thread_pool = QThreadPool.globalInstance()
         self.active_tasks: list[BackgroundTask] = []
+        self.catalog_refresh_task: BackgroundTask | None = None
+        self.catalog_refresh_pending = False
+        self.pending_catalog_source_ids: set[str] | None = set()
         self.setObjectName("page")
         layout = QVBoxLayout(self)
         layout.setContentsMargins(28, 24, 28, 24)
@@ -165,6 +168,8 @@ class SliceManagerPage(QWidget):
         self._build_sources_tab()
         self.refresh_installed()
         self.refresh_sources()
+        self.catalog_refreshed(CatalogRefresh(tuple(self.backend.context.available), ()))
+        self.tabs.currentChanged.connect(self.tab_changed)
 
     def _build_installed_tab(self) -> None:
         layout = QVBoxLayout(self.installed_tab)
@@ -189,7 +194,7 @@ class SliceManagerPage(QWidget):
         layout = QVBoxLayout(self.available_tab)
         toolbar = QHBoxLayout()
         self.refresh_button = QPushButton("Refresh Sources")
-        self.refresh_button.clicked.connect(self.refresh_available)
+        self.refresh_button.clicked.connect(lambda: self.refresh_available())
         install = QPushButton("Install selected")
         install.setObjectName("primary")
         install.clicked.connect(self.install_selected)
@@ -246,16 +251,43 @@ class SliceManagerPage(QWidget):
         for column in range(self.installed.columnCount()):
             self.installed.resizeColumnToContents(column)
 
-    def refresh_available(self) -> None:
+    def tab_changed(self, index: int) -> None:
+        if self.tabs.widget(index) is self.available_tab:
+            self.refresh_available_if_stale(120)
+
+    def refresh_available_if_stale(self, max_age_seconds: int) -> None:
+        if self.backend.source_catalogs_are_stale(max_age_seconds):
+            self.refresh_available()
+
+    def refresh_available(self, source_ids: set[str] | None = None) -> None:
+        if self.catalog_refresh_task is not None:
+            self.catalog_refresh_pending = True
+            if source_ids is None:
+                self.pending_catalog_source_ids = None
+            elif self.pending_catalog_source_ids is not None:
+                self.pending_catalog_source_ids.update(source_ids)
+            return
         self.refresh_button.setEnabled(False)
         self.catalog_status.setText("Refreshing Sources…")
-        task = BackgroundTask(self.backend.refresh_source_catalogs)
+        task = BackgroundTask(lambda: self.backend.refresh_source_catalogs(source_ids))
+        self.catalog_refresh_task = task
         task.signals.completed.connect(self.catalog_refreshed)
         task.signals.failed.connect(lambda message: QMessageBox.critical(self, "Source refresh failed", message))
         task.signals.finished.connect(lambda: self.refresh_button.setEnabled(True))
-        task.signals.finished.connect(lambda: self.active_tasks.remove(task) if task in self.active_tasks else None)
+        task.signals.finished.connect(lambda: self.catalog_refresh_finished(task))
         self.active_tasks.append(task)
         self.thread_pool.start(task)
+
+    def catalog_refresh_finished(self, task: BackgroundTask) -> None:
+        self.catalog_refresh_task = None
+        if task in self.active_tasks:
+            self.active_tasks.remove(task)
+        if not self.catalog_refresh_pending:
+            return
+        source_ids = self.pending_catalog_source_ids
+        self.catalog_refresh_pending = False
+        self.pending_catalog_source_ids = set()
+        self.refresh_available(source_ids)
 
     def catalog_refreshed(self, refresh: CatalogRefresh) -> None:
         items = refresh.items
@@ -266,7 +298,7 @@ class SliceManagerPage(QWidget):
             compatibility = evaluate_slice_compatibility(item)
             if item.id not in installed:
                 status = "Available"
-            elif self.backend.slice_update_available(item, installed):
+            elif item.is_update_for(installed[item.id]):
                 status = "Update available"
             else:
                 status = "Installed"
@@ -296,7 +328,7 @@ class SliceManagerPage(QWidget):
             enabled.setAccessibleName(f"Enable {source.name}")
             enabled.clicked.connect(lambda checked, item=row: self.sources.setCurrentItem(item))
             enabled.clicked.connect(
-                lambda checked, source_id=source.id: self.backend.set_source_enabled(source_id, checked)
+                lambda checked, source_id=source.id: self.source_enabled_changed(source_id, checked)
             )
             row.setSizeHint(0, enabled.sizeHint())
             self.sources.setItemWidget(row, 0, enabled)
@@ -310,6 +342,9 @@ class SliceManagerPage(QWidget):
         if selected.text(4) == "Installed":
             return
         item = self.available_items[str(selected.data(0, Qt.UserRole))]
+        self.install_slice(item)
+
+    def install_slice(self, item: CatalogSlice) -> None:
         self.catalog_status.setText(f"Installing {item.name}…")
         task = BackgroundTask(lambda: self.backend.install_catalog_slice(item))
         task.signals.completed.connect(lambda _: self.installation_completed(item))
@@ -319,10 +354,9 @@ class SliceManagerPage(QWidget):
         self.thread_pool.start(task)
 
     def installation_completed(self, item: CatalogSlice) -> None:
-        self.catalog_status.setText(f"Installed {item.name} {item.version}")
         self.refresh_installed()
-        self.refresh_available()
-        self.library_changed.emit()
+        self.catalog_refreshed(CatalogRefresh(tuple(self.backend.context.available), ()))
+        self.catalog_status.setText(f"Installed {item.name} {item.version}")
 
     def uninstall_selected(self) -> None:
         selected = self.installed.currentItem()
@@ -335,7 +369,7 @@ class SliceManagerPage(QWidget):
             QMessageBox.information(self, "Bundled Slice", str(error))
             return
         self.refresh_installed()
-        self.library_changed.emit()
+        self.catalog_refreshed(CatalogRefresh(tuple(self.backend.context.available), ()))
 
     def rollback_selected(self) -> None:
         selected = self.installed.currentItem()
@@ -359,7 +393,14 @@ class SliceManagerPage(QWidget):
             QMessageBox.warning(self, "Slice rollback", str(error))
             return
         self.refresh_installed()
-        self.library_changed.emit()
+        self.catalog_refreshed(CatalogRefresh(tuple(self.backend.context.available), ()))
+
+    def source_enabled_changed(self, source_id: str, enabled: bool) -> None:
+        self.backend.set_source_enabled(source_id, enabled)
+        if enabled:
+            self.refresh_available({source_id})
+        else:
+            self.catalog_refreshed(CatalogRefresh(self.backend.load_cached_catalogs(), ()))
 
     def add_source(self) -> None:
         dialog = SourceDialog(self)
@@ -377,6 +418,7 @@ class SliceManagerPage(QWidget):
             QMessageBox.critical(self, "Could not add Source", str(error))
             return
         self.refresh_sources()
+        self.refresh_available({source.id})
 
     def remove_source(self) -> None:
         selected = self.sources.currentItem()
@@ -385,6 +427,7 @@ class SliceManagerPage(QWidget):
         source_id = str(selected.data(0, Qt.UserRole))
         self.backend.remove_source(source_id)
         self.refresh_sources()
+        self.catalog_refreshed(CatalogRefresh(tuple(self.backend.context.available), ()))
 
     def edit_source(self) -> None:
         selected = self.sources.currentItem()
@@ -396,11 +439,13 @@ class SliceManagerPage(QWidget):
         if dialog.exec() != QDialog.Accepted:
             return
         try:
-            self.backend.update_source(source_id, dialog.source_definition(), dialog.token.text().strip() or None)
+            updated = dialog.source_definition()
+            self.backend.update_source(source_id, updated, dialog.token.text().strip() or None)
         except Exception as error:
             QMessageBox.critical(self, "Could not update Source", str(error))
             return
         self.refresh_sources()
+        self.refresh_available({updated.id})
 
     def export_portable_copy(self) -> None:
         exported_at = time.time_ns() // 1_000_000
@@ -492,4 +537,5 @@ class SliceManagerPage(QWidget):
         self.backend.context.vault.secrets = None
         self.refresh_sources()
         self.refresh_installed()
+        self.refresh_available()
         self.library_changed.emit()

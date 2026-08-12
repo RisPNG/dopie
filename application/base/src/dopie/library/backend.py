@@ -17,6 +17,7 @@ class LibraryItem:
     favorite: bool = False
     manifest: SliceManifest | None = None
     catalog: CatalogSlice | None = None
+    update: CatalogSlice | None = None
 
 
 class LibraryBackend:
@@ -38,6 +39,10 @@ class LibraryBackend:
                 installed=True,
                 favorite=manifest.id in favorites,
                 manifest=manifest,
+                update=next(
+                    (catalog for catalog in self.context.available if catalog.is_update_for(manifest)),
+                    None,
+                ),
             )
             for manifest in installed
         ]

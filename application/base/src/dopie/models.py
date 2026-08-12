@@ -7,6 +7,8 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
+from packaging.version import InvalidVersion, Version
+
 
 @dataclass(frozen=True)
 class SliceManifest:
@@ -156,6 +158,14 @@ class CatalogSlice:
     python: str = ">=3.11"
     platforms: tuple[str, ...] = ()
     architectures: tuple[str, ...] = ()
+
+    def is_update_for(self, manifest: SliceManifest) -> bool:
+        if manifest.origin != "installed" or manifest.source_id != self.source_id or manifest.id != self.id:
+            return False
+        try:
+            return Version(self.version) > Version(manifest.version)
+        except InvalidVersion:
+            return self.version != manifest.version
 
     @classmethod
     def from_dict(cls, data: dict[str, Any], source_id: str) -> CatalogSlice:

@@ -21,6 +21,7 @@ from dopie.library.backend import LibraryBackend, LibraryItem
 class SliceCard(QFrame):
     activated = Signal(object)
     favorite_changed = Signal(str, bool)
+    update_requested = Signal(object)
 
     def __init__(self, item: LibraryItem):
         super().__init__()
@@ -54,18 +55,29 @@ class SliceCard(QFrame):
         description.setAlignment(Qt.AlignTop)
         category = QLabel(item.category)
         category.setObjectName("muted")
+        actions = QHBoxLayout()
+        actions.addStretch()
         action = QPushButton("Open" if item.installed else "Install")
-        action.setObjectName("primary")
+        if item.update is None:
+            action.setObjectName("primary")
         action.clicked.connect(lambda: self.activated.emit(self.item))
+        actions.addWidget(action)
+        if item.update is not None:
+            update = QPushButton("Update")
+            update.setObjectName("primary")
+            update.setToolTip(f"Update to {item.update.version}")
+            update.clicked.connect(lambda: self.update_requested.emit(item.update))
+            actions.addWidget(update)
         layout.addLayout(heading)
         layout.addWidget(description, 1)
         layout.addWidget(category)
-        layout.addWidget(action, 0, Qt.AlignRight)
+        layout.addLayout(actions)
 
 
 class LibraryPage(QWidget):
     open_slice = Signal(object)
     manage_slice = Signal(object)
+    update_slice = Signal(object)
     favorites_changed = Signal()
 
     def __init__(self, backend: LibraryBackend, favorites_only: bool = False):
@@ -107,6 +119,7 @@ class LibraryPage(QWidget):
             card = SliceCard(item)
             card.activated.connect(self.open_slice if item.installed else self.manage_slice)
             card.favorite_changed.connect(self.change_favorite)
+            card.update_requested.connect(self.update_slice)
             self.grid.addItem(list_item)
             self.grid.setItemWidget(list_item, card)
 

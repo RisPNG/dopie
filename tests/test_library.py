@@ -1,7 +1,13 @@
 from __future__ import annotations
 
+import json
+from dataclasses import replace
+
+from PySide6.QtWidgets import QApplication, QPushButton
+
 from dopie.context import ApplicationContext, VaultSession
-from dopie.library.backend import LibraryBackend
+from dopie.library.backend import LibraryBackend, LibraryItem
+from dopie.library.frontend import SliceCard
 from dopie.models import CatalogSlice, SourceDefinition
 from dopie.paths import resolve_app_paths
 from dopie.security.vault import VaultStore
@@ -76,3 +82,73 @@ def test_library_loads_available_slices_from_portable_cache(tmp_path, monkeypatc
     paths.catalog_cache.joinpath("source.json").write_text("not json", encoding="utf-8")
 
     assert SliceManagerBackend(context).load_cached_catalogs() == ()
+
+
+def test_library_only_offers_updates_from_the_installed_slice_source(tmp_path, monkeypatch):
+    monkeypatch.setenv("DOPIE_ROOT", str(tmp_path))
+    paths = resolve_app_paths()
+    installed = paths.installed_slices / "remote"
+    version = installed / "versions" / "1.0.0"
+    version.mkdir(parents=True)
+    version.joinpath("slice.toml").write_text(
+        'id="remote"\nname="Remote"\nversion="1.0.0"\ndescription="Installed"\n'
+        'interface="standard"\noperation="backend:run"',
+        encoding="utf-8",
+    )
+    installed.joinpath("current.json").write_text(
+        json.dumps({"version": "1.0.0", "source_id": "trusted"}),
+        encoding="utf-8",
+    )
+    context = ApplicationContext(
+        paths=paths,
+        settings=SettingsStore(paths.settings),
+        sources=SourceStore(paths.sources),
+        vault=VaultSession(VaultStore(paths.vault, paths.vault_key)),
+        discovery=SliceDiscovery(paths.bundled_slices, paths.installed_slices),
+        installer=SliceInstaller(paths.installed_slices),
+    )
+    update = CatalogSlice(
+        "remote",
+        "Remote",
+        "2.0.0",
+        "Available",
+        "Other",
+        "DoPie",
+        "MIT",
+        "https://example.test/remote.zip",
+        "abc",
+        "other",
+    )
+    context.available = [update]
+
+    assert LibraryBackend(context).build_library()[0].update is None
+
+    context.available = [replace(update, source_id="trusted")]
+
+    assert LibraryBackend(context).build_library()[0].update.version == "2.0.0"
+
+
+def test_slice_card_places_update_beside_open(tmp_path, monkeypatch):
+    monkeypatch.setenv("QT_QPA_PLATFORM", "offscreen")
+    application = QApplication.instance() or QApplication([])
+    update = CatalogSlice(
+        "remote",
+        "Remote",
+        "2.0.0",
+        "Available",
+        "Other",
+        "DoPie",
+        "MIT",
+        "https://example.test/remote.zip",
+        "abc",
+        "trusted",
+    )
+
+    card = SliceCard(LibraryItem("remote", "Remote", "1.0.0", "Installed", "Other", True, update=update))
+    buttons = card.findChildren(QPushButton)
+
+    assert [button.text() for button in buttons] == ["Open", "Update"]
+    assert buttons[0].objectName() == ""
+    assert buttons[1].objectName() == "primary"
+    card.close()
+    application.processEvents()
