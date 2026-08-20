@@ -52,7 +52,7 @@ class StandardSliceWidget(QWidget):
                 widget = QPlainTextEdit()
                 widget.setPlaceholderText(str(definition.get("placeholder", "")))
             elif field_type == "password":
-                widget = QLineEdit()
+                widget = QLineEdit(str(definition.get("default", "")))
                 widget.setEchoMode(QLineEdit.Password)
                 widget.setPlaceholderText(str(definition.get("placeholder", "")))
             elif field_type == "integer":
