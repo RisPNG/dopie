@@ -51,6 +51,10 @@ class StandardSliceWidget(QWidget):
             if field_type == "multiline":
                 widget = QPlainTextEdit()
                 widget.setPlaceholderText(str(definition.get("placeholder", "")))
+            elif field_type == "password":
+                widget = QLineEdit()
+                widget.setEchoMode(QLineEdit.Password)
+                widget.setPlaceholderText(str(definition.get("placeholder", "")))
             elif field_type == "integer":
                 widget = QSpinBox()
                 widget.setRange(int(definition.get("minimum", -2147483648)), int(definition.get("maximum", 2147483647)))
