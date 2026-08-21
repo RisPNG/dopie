@@ -78,7 +78,7 @@ def test_installer_keeps_versions_and_can_roll_back(tmp_path, monkeypatch):
     monkeypatch.setattr(
         RemoteRepositoryClient,
         "download_artifact",
-        lambda self, url: packages[url.rsplit("/", 1)[-1]],
+        lambda self, url, progress=None: packages[url.rsplit("/", 1)[-1]],
     )
     installer = SliceInstaller(tmp_path / "installed")
     source = SourceDefinition("source", "Source", "https://github.com/owner/repository")

@@ -139,6 +139,8 @@ class SourceDialog(QDialog):
 
 class SliceManagerPage(QWidget):
     library_changed = Signal()
+    slice_installation_started = Signal(str)
+    slice_installation_progress = Signal(str, int)
 
     def __init__(self, backend: SliceManagerBackend):
         super().__init__()
@@ -346,8 +348,16 @@ class SliceManagerPage(QWidget):
 
     def install_slice(self, item: CatalogSlice) -> None:
         self.catalog_status.setText(f"Installing {item.name}…")
-        task = BackgroundTask(lambda: self.backend.install_catalog_slice(item))
+        self.slice_installation_started.emit(item.id)
+        task = BackgroundTask(lambda: self.backend.install_catalog_slice(item, task.signals.progress.emit))
+        task.signals.progress.connect(
+            lambda percent: (
+                self.catalog_status.setText(f"Installing {item.name}… {percent}%"),
+                self.slice_installation_progress.emit(item.id, percent),
+            )
+        )
         task.signals.completed.connect(lambda _: self.installation_completed(item))
+        task.signals.failed.connect(lambda _: self.library_changed.emit())
         task.signals.failed.connect(lambda message: QMessageBox.critical(self, "Installation failed", message))
         task.signals.finished.connect(lambda: self.active_tasks.remove(task) if task in self.active_tasks else None)
         self.active_tasks.append(task)

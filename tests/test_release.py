@@ -1,8 +1,8 @@
 from __future__ import annotations
 
+import tomllib
 from pathlib import Path
 
-import tomllib
 from dopie import __version__
 from dopie.changelog.backend import ChangelogReader
 
@@ -12,7 +12,7 @@ def test_release_metadata_and_notes_match():
     with project.joinpath("pyproject.toml").open("rb") as stream:
         metadata_version = str(tomllib.load(stream)["project"]["version"])
 
-    assert __version__ == metadata_version == "1.1.2"
+    assert __version__ == metadata_version == "1.1.3"
     assert ChangelogReader(project / "changelog").release_notes_since("0.1.0", __version__).startswith(
-        "# DoPie 1.1.2"
+        "# DoPie 1.1.3"
     )

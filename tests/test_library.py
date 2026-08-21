@@ -150,5 +150,8 @@ def test_slice_card_places_update_beside_open(tmp_path, monkeypatch):
     assert [button.text() for button in buttons] == ["Open", "Update"]
     assert buttons[0].objectName() == ""
     assert buttons[1].objectName() == "primary"
+    buttons[1].click()
+    assert buttons[1].text() == "Updating…"
+    assert not buttons[1].isEnabled()
     card.close()
     application.processEvents()

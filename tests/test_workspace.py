@@ -2,9 +2,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from PySide6.QtWidgets import QApplication, QLineEdit
+
 from dopie.models import SliceManifest
 from dopie.workspace.frontend import StandardSliceWidget
-from PySide6.QtWidgets import QApplication, QLineEdit
 
 
 def test_standard_slice_masks_and_requires_password_input(monkeypatch, tmp_path):

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import json
+from collections.abc import Callable
 from typing import Any
 from urllib.parse import quote, urlparse
 from urllib.request import Request, urlopen
@@ -49,7 +50,11 @@ class RemoteRepositoryClient:
             data: dict[str, Any] = json.load(response)
         return base64.b64decode(data["content"])
 
-    def download_repository_archive(self, revision: str) -> bytes:
+    def download_repository_archive(
+        self,
+        revision: str,
+        progress: Callable[[int], None] | None = None,
+    ) -> bytes:
         repository = "/".join(quote(part, safe="") for part in self.source.repository.split("/"))
         revision = quote(revision, safe="")
         if self.source.provider == "github":
@@ -59,17 +64,36 @@ class RemoteRepositoryClient:
             url = f"{base_url}/api/v1/repos/{repository}/archive/{revision}.zip"
         else:
             raise ValueError(f"Unsupported Source provider: {self.source.provider}")
-        headers = {"Accept": "application/octet-stream", "User-Agent": "DoPie"}
+        headers = {
+            "Accept": "application/vnd.github+json" if self.source.provider == "github" else "application/octet-stream",
+            "User-Agent": "DoPie",
+        }
         if self.token:
             headers["Authorization"] = f"Bearer {self.token}"
         with urlopen(Request(url, headers=headers), timeout=120) as response:
-            return response.read()
+            total = int(response.headers.get("Content-Length", 0))
+            downloaded = 0
+            chunks = []
+            while chunk := response.read(64 * 1024):
+                chunks.append(chunk)
+                downloaded += len(chunk)
+                if progress is not None and total:
+                    progress(min(downloaded * 100 // total, 100))
+            return b"".join(chunks)
 
-    def download_artifact(self, url: str) -> bytes:
+    def download_artifact(self, url: str, progress: Callable[[int], None] | None = None) -> bytes:
         headers = {"Accept": "application/octet-stream", "User-Agent": "DoPie"}
         repository_host = urlparse(self.source.repository_url).hostname
         allowed_hosts = {repository_host, "api.github.com"} if self.source.provider == "github" else {repository_host}
         if self.token and urlparse(url).hostname in allowed_hosts:
             headers["Authorization"] = f"Bearer {self.token}"
         with urlopen(Request(url, headers=headers), timeout=120) as response:
-            return response.read()
+            total = int(response.headers.get("Content-Length", 0))
+            downloaded = 0
+            chunks = []
+            while chunk := response.read(64 * 1024):
+                chunks.append(chunk)
+                downloaded += len(chunk)
+                if progress is not None and total:
+                    progress(min(downloaded * 100 // total, 100))
+            return b"".join(chunks)

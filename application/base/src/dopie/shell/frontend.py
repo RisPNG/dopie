@@ -12,6 +12,7 @@ from PySide6.QtWidgets import (
     QMainWindow,
     QMenu,
     QMessageBox,
+    QProgressDialog,
     QStackedWidget,
     QToolButton,
     QVBoxLayout,
@@ -134,6 +135,10 @@ class MainWindow(QMainWindow):
         self.favorites.favorites_changed.connect(self.refresh_libraries)
         self.manager.library_changed.connect(self.library.refresh)
         self.manager.library_changed.connect(self.favorites.refresh)
+        self.manager.slice_installation_started.connect(self.library.show_update_progress)
+        self.manager.slice_installation_started.connect(self.favorites.show_update_progress)
+        self.manager.slice_installation_progress.connect(self.library.show_update_progress)
+        self.manager.slice_installation_progress.connect(self.favorites.show_update_progress)
         main_layout.addWidget(self.topbar)
         main_layout.addWidget(self.pages, 1)
         layout.addWidget(sidebar)
@@ -250,9 +255,27 @@ class MainWindow(QMainWindow):
             return
         if QMessageBox.question(self, "Update available", "Prepare the latest version now?") != QMessageBox.Yes:
             return
-        task = BackgroundTask(lambda: service.prepare_update(source, revision, token))
+        progress = QProgressDialog("Downloading DoPie update…", "", 0, 0, self)
+        progress.setWindowTitle("Updating DoPie")
+        progress.setWindowModality(Qt.WindowModal)
+        progress.setCancelButton(None)
+        progress.setMinimumDuration(0)
+        progress.setAutoClose(False)
+        progress.setAutoReset(False)
+        progress.show()
+        task = BackgroundTask(lambda: service.prepare_update(source, revision, token, task.signals.progress.emit))
+        task.signals.progress.connect(
+            lambda percent: (
+                progress.setRange(0, 100),
+                progress.setValue(percent),
+                progress.setLabelText("Preparing DoPie update…" if percent == 100 else "Downloading DoPie update…"),
+            )
+        )
+        task.signals.completed.connect(progress.close)
         task.signals.completed.connect(self.application_update_prepared)
+        task.signals.failed.connect(progress.close)
         task.signals.failed.connect(lambda message: QMessageBox.critical(self, "Update failed", message))
+        task.signals.finished.connect(progress.close)
         task.signals.finished.connect(lambda: self.active_tasks.remove(task) if task in self.active_tasks else None)
         self.active_tasks.append(task)
         self.thread_pool.start(task)

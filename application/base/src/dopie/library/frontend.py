@@ -9,6 +9,7 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QListWidget,
     QListWidgetItem,
+    QProgressBar,
     QPushButton,
     QToolButton,
     QVBoxLayout,
@@ -63,11 +64,23 @@ class SliceCard(QFrame):
         action.clicked.connect(lambda: self.activated.emit(self.item))
         actions.addWidget(action)
         if item.update is not None:
-            update = QPushButton("Update")
-            update.setObjectName("primary")
-            update.setToolTip(f"Update to {item.update.version}")
-            update.clicked.connect(lambda: self.update_requested.emit(item.update))
-            actions.addWidget(update)
+            self.update_button = QPushButton("Update")
+            self.update_button.setObjectName("primary")
+            self.update_button.setToolTip(f"Update to {item.update.version}")
+            self.update_button.clicked.connect(
+                lambda: (
+                    self.update_button.setText("Updating…"),
+                    self.update_button.setEnabled(False),
+                    self.update_requested.emit(item.update),
+                )
+            )
+            self.update_progress = QProgressBar()
+            self.update_progress.setRange(0, 0)
+            self.update_progress.setTextVisible(True)
+            self.update_progress.setFixedWidth(104)
+            self.update_progress.setVisible(False)
+            actions.addWidget(self.update_progress)
+            actions.addWidget(self.update_button)
         layout.addLayout(heading)
         layout.addWidget(description, 1)
         layout.addWidget(category)
@@ -122,6 +135,17 @@ class LibraryPage(QWidget):
             card.update_requested.connect(self.update_slice)
             self.grid.addItem(list_item)
             self.grid.setItemWidget(list_item, card)
+
+    def show_update_progress(self, slice_id: str, percent: int | None = None) -> None:
+        for index in range(self.grid.count()):
+            card = self.grid.itemWidget(self.grid.item(index))
+            if card.item.id != slice_id or not hasattr(card, "update_progress"):
+                continue
+            card.update_button.setVisible(False)
+            card.update_progress.setVisible(True)
+            if percent is not None:
+                card.update_progress.setRange(0, 100)
+                card.update_progress.setValue(percent)
 
     def change_favorite(self, slice_id: str, favorite: bool) -> None:
         self.backend.set_slice_favorite(slice_id, favorite)

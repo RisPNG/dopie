@@ -6,6 +6,7 @@ import subprocess
 import tempfile
 import tomllib
 import zipfile
+from collections.abc import Callable
 from io import BytesIO
 from pathlib import Path
 
@@ -65,8 +66,19 @@ class ApplicationUpdateService:
             temporary.replace(self.state)
         return revision if revision != installed_revision else None
 
-    def prepare_update(self, source: SourceDefinition, revision: str, token: str | None = None) -> dict[str, str]:
-        archive = RemoteRepositoryClient(source, token).download_repository_archive(revision)
+    def prepare_update(
+        self,
+        source: SourceDefinition,
+        revision: str,
+        token: str | None = None,
+        progress: Callable[[int], None] | None = None,
+    ) -> dict[str, str]:
+        client = RemoteRepositoryClient(source, token)
+        archive = (
+            client.download_repository_archive(revision)
+            if progress is None
+            else client.download_repository_archive(revision, progress)
+        )
         with tempfile.TemporaryDirectory(prefix="dopie-update-", dir=self.updates) as temporary:
             extracted = Path(temporary) / "archive"
             extracted.mkdir()

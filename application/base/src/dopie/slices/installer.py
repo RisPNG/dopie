@@ -5,6 +5,7 @@ import json
 import shutil
 import tempfile
 import zipfile
+from collections.abc import Callable
 from io import BytesIO
 from pathlib import Path
 
@@ -17,8 +18,19 @@ class SliceInstaller:
         self.installed = installed
         self.installed.mkdir(parents=True, exist_ok=True)
 
-    def install_slice(self, item: CatalogSlice, source: SourceDefinition, token: str | None = None) -> None:
-        archive = RemoteRepositoryClient(source, token).download_artifact(item.download_url)
+    def install_slice(
+        self,
+        item: CatalogSlice,
+        source: SourceDefinition,
+        token: str | None = None,
+        progress: Callable[[int], None] | None = None,
+    ) -> None:
+        client = RemoteRepositoryClient(source, token)
+        archive = (
+            client.download_artifact(item.download_url)
+            if progress is None
+            else client.download_artifact(item.download_url, progress)
+        )
         digest = hashlib.sha256(archive).hexdigest()
         if digest != item.sha256.removeprefix("sha256:"):
             raise ValueError(f"Checksum verification failed for {item.name}")

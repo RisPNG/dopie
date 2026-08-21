@@ -10,6 +10,7 @@ class TaskSignals(QObject):
     completed = Signal(object)
     failed = Signal(str)
     finished = Signal()
+    progress = Signal(int)
 
 
 class BackgroundTask(QRunnable):

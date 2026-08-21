@@ -40,13 +40,18 @@ def test_private_source_token_is_not_sent_to_an_unrelated_artifact_host(monkeypa
     headers: list[dict[str, str]] = []
 
     class Response:
+        headers = {}
+
         def __enter__(self):
             return self
 
         def __exit__(self, *args):
             return None
 
-        def read(self):
+        def read(self, size):
+            if hasattr(self, "read_once"):
+                return b""
+            self.read_once = True
             return b"artifact"
 
     def open_request(request, timeout):
@@ -62,3 +67,59 @@ def test_private_source_token_is_not_sent_to_an_unrelated_artifact_host(monkeypa
 
     assert "Authorization" not in headers[0]
     assert headers[1]["Authorization"] == "Bearer secret-token"
+
+
+def test_download_reports_progress_when_content_length_is_available(monkeypatch):
+    class Response:
+        headers = {"Content-Length": "8"}
+
+        def __init__(self):
+            self.payload = BytesIO(b"artifact")
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return None
+
+        def read(self, size):
+            return self.payload.read(size)
+
+    monkeypatch.setattr("dopie.sources.remote.urlopen", lambda request, timeout: Response())
+    progress: list[int] = []
+    source = SourceDefinition("public", "Public", "https://github.com/team/public")
+
+    payload = RemoteRepositoryClient(source).download_artifact(
+        "https://api.github.com/repos/team/public/zipball/main",
+        progress.append,
+    )
+
+    assert payload == b"artifact"
+    assert progress == [100]
+
+
+def test_github_repository_archive_uses_supported_media_type(monkeypatch):
+    requests = []
+
+    class Response:
+        headers = {}
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return None
+
+        def read(self, size):
+            return b""
+
+    def open_request(request, timeout):
+        requests.append(request)
+        return Response()
+
+    monkeypatch.setattr("dopie.sources.remote.urlopen", open_request)
+    source = SourceDefinition("public", "Public", "https://github.com/team/public")
+
+    RemoteRepositoryClient(source).download_repository_archive("revision")
+
+    assert requests[0].get_header("Accept") == "application/vnd.github+json"

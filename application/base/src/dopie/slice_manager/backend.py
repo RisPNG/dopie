@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import time
+from collections.abc import Callable
 from dataclasses import asdict, dataclass
 
 from dopie.context import ApplicationContext
@@ -97,13 +98,13 @@ class SliceManagerBackend:
         self.context.available = sorted(available.values(), key=lambda item: item.name.casefold())
         return CatalogRefresh(tuple(self.context.available), tuple(errors))
 
-    def install_catalog_slice(self, item: CatalogSlice) -> None:
+    def install_catalog_slice(self, item: CatalogSlice, progress: Callable[[int], None] | None = None) -> None:
         compatibility = evaluate_slice_compatibility(item)
         if not compatibility.compatible:
             raise ValueError(compatibility.reason)
         source = next(source for source in self.context.sources.load() if source.id == item.source_id)
         token = self.context.vault.source_credential(source.credential)
-        self.context.installer.install_slice(item, source, token)
+        self.context.installer.install_slice(item, source, token, progress)
 
     def uninstall_managed_slice(self, manifest: SliceManifest) -> None:
         if manifest.origin != "installed":
