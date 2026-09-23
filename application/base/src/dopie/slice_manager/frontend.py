@@ -487,7 +487,7 @@ class SliceManagerPage(QWidget):
             password, accepted = QInputDialog.getText(
                 self,
                 "Protect Private Sources",
-                "Transfer password (optional; leave blank to include credentials without password protection)",
+                "Transfer password",
                 QLineEdit.Password,
             )
             if not accepted:
