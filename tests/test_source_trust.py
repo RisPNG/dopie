@@ -1,13 +1,17 @@
 from __future__ import annotations
 
+import json
 import zipfile
+
+import pytest
 
 from dopie.paths import resolve_app_paths
 from dopie.security.vault import VaultStore
 from dopie.sources.profile import PortableProfileService
 
 
-def test_portable_profile_moves_encrypted_sources_without_installed_slices(tmp_path, monkeypatch):
+@pytest.mark.parametrize("password", [None, "", "transfer password"])
+def test_portable_profile_moves_encrypted_sources_without_installed_slices(tmp_path, monkeypatch, password):
     source_root = tmp_path / "source"
     destination_root = tmp_path / "destination"
     source_root.mkdir()
@@ -25,18 +29,40 @@ def test_portable_profile_moves_encrypted_sources_without_installed_slices(tmp_p
     installed.mkdir(parents=True)
     installed.joinpath("slice.toml").write_text("installed", encoding="utf-8")
     profile = tmp_path / "portable.dopie-profile"
-    PortableProfileService(source_paths).export_portable_profile(profile, password="transfer password")
+    PortableProfileService(source_paths).export_portable_profile(profile, password=password)
 
     monkeypatch.setenv("DOPIE_ROOT", str(destination_root))
     destination_paths = resolve_app_paths()
     service = PortableProfileService(destination_paths)
-    assert service.profile_requires_password(profile)
-    service.import_portable_profile(profile, "transfer password")
+    assert service.profile_requires_password(profile) == bool(password)
+    service.import_portable_profile(profile, password)
 
     assert VaultStore(destination_paths.vault, destination_paths.vault_key).unlock() == {
         "credentials": {"source:private": "token-value"}
     }
     assert not (destination_paths.installed_slices / "tool" / "versions" / "1.0.0").exists()
+    assert destination_paths.vault_key.read_bytes() != source_paths.vault_key.read_bytes()
+
+
+def test_existing_private_profile_still_requires_password(tmp_path, monkeypatch):
+    monkeypatch.setenv("DOPIE_ROOT", str(tmp_path))
+    paths = resolve_app_paths()
+    vault = VaultStore(paths.vault, paths.vault_key)
+    secrets = {"credentials": {"source:private": "private-token"}}
+    vault.seal(secrets)
+    profile = tmp_path / "existing.dopie-profile"
+    with zipfile.ZipFile(profile, "w") as archive:
+        archive.writestr("profile.json", json.dumps({
+            "format": "dopie-portable-profile", "version": 2, "private_sources": True,
+        }))
+        archive.writestr("data/source-vault.dopie", vault.export_for_transfer("password"))
+    service = PortableProfileService(paths)
+
+    assert service.profile_requires_password(profile)
+    with pytest.raises(ValueError, match="transfer password is required"):
+        service.import_portable_profile(profile)
+    service.import_portable_profile(profile, "password")
+    assert vault.unlock() == secrets
 
 
 def test_portable_copy_contains_launchers_profile_and_no_local_state(tmp_path, monkeypatch):

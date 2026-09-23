@@ -25,9 +25,9 @@ DoPie keeps all persistent state inside its own folder. That state includes Sour
 
 ## Transfer a preconfigured copy
 
-Configure the Sources on your copy, open **Slice Manager → Sources**, and select **Export Portable Copy**. Choose Linux, Windows, or both launch scripts. A copy containing private Sources asks you to choose a transfer password; public-only copies do not need one. Installed Slices and the runtime are never included; the receiving computer obtains Slices from the configured Sources and downloads and verifies its own runtime on first launch.
+Configure the Sources on your copy, open **Slice Manager → Sources**, and select **Export Portable Copy**. Choose Linux, Windows, or both launch scripts. A copy containing private Sources offers an optional transfer password. Leave it blank to include the credentials without password protection; public-only copies do not need one. Installed Slices and the runtime are never included; the receiving computer obtains Slices from the configured Sources and downloads and verifies its own runtime on first launch.
 
-Extract the resulting ZIP and transfer its `DoPie` folder. On that copy's first launch, DoPie imports `provisioning/DoPie.dopie-profile` automatically. Private Sources request the transfer password once, then DoPie creates a new encrypted key inside that portable folder, records the imported profile, and deletes the one-time provisioning file. An incorrect password imports nothing and leaves the profile available for another attempt.
+Extract the resulting ZIP and transfer its `DoPie` folder. On that copy's first launch, DoPie imports `provisioning/DoPie.dopie-profile` automatically. Password-protected profiles request the transfer password once; profiles exported without a password import automatically. DoPie creates a new encrypted vault with a fresh key inside that portable folder, records the imported profile, and deletes the one-time provisioning file. An incorrect password imports nothing and leaves the profile available for another attempt.
 
 The Linux taskbar icon temporarily requires `dopie.desktop` in the current user's application directory. DoPie removes a stale entry on startup, recreates it while running, and removes it during normal shutdown. Update, profile, and Slice staging directories remain inside the DoPie folder.
 

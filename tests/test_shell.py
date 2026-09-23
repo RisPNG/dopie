@@ -52,7 +52,7 @@ def test_shell_builds_all_primary_pages_offscreen(tmp_path, monkeypatch):
         SliceDiscovery(paths.bundled_slices, paths.installed_slices),
         SliceInstaller(paths.installed_slices),
     )
-    context.settings.save({"theme": "system", "last_seen_version": "1.1.3"})
+    context.settings.save({"theme": "system", "last_seen_version": "1.1.4"})
     context.sources.save(
         [SourceDefinition("community", "Community", "https://github.com/example/community")]
     )

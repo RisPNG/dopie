@@ -21,12 +21,11 @@ class PortableProfileService:
         password: str | None = None,
     ) -> None:
         private_sources = self.paths.vault.exists()
-        if private_sources and not password:
-            raise ValueError("A transfer password is required for private Sources")
         manifest = {
             "format": "dopie-portable-profile",
             "version": 2,
             "private_sources": private_sources,
+            "requires_password": private_sources and bool(password),
         }
         with zipfile.ZipFile(destination, "w", compression=zipfile.ZIP_DEFLATED) as archive:
             archive.writestr("profile.json", json.dumps(manifest, indent=2))
@@ -34,10 +33,10 @@ class PortableProfileService:
                 "data/sources.json",
                 self.paths.sources.read_text(encoding="utf-8") if self.paths.sources.exists() else "[]",
             )
-            if self.paths.vault.exists():
+            if private_sources:
                 archive.writestr(
                     "data/source-vault.dopie",
-                    VaultStore(self.paths.vault, self.paths.vault_key).export_for_transfer(password),
+                    VaultStore(self.paths.vault, self.paths.vault_key).export_for_transfer(password or ""),
                 )
             settings = SettingsStore(self.paths.settings).load()
             portable_settings = {
@@ -50,6 +49,7 @@ class PortableProfileService:
                 )
             }
             archive.writestr("data/preferences.json", json.dumps(portable_settings, indent=2))
+
     def export_portable_copy(
         self,
         destination: Path,
@@ -99,7 +99,7 @@ class PortableProfileService:
             manifest = json.loads(archive.read("profile.json"))
         if manifest.get("format") != "dopie-portable-profile" or manifest.get("version") != 2:
             raise ValueError("Unsupported DoPie portable profile")
-        return bool(manifest.get("private_sources"))
+        return bool(manifest.get("requires_password", manifest.get("private_sources")))
 
     def import_portable_profile(self, source: Path, password: str | None = None) -> None:
         with tempfile.TemporaryDirectory(prefix="dopie-profile-", dir=self.paths.data) as temporary:
@@ -130,12 +130,13 @@ class PortableProfileService:
             merged_preferences.update(portable_preferences)
             imported_preferences.write_text(json.dumps(merged_preferences, indent=2), encoding="utf-8")
             if manifest.get("private_sources"):
-                if not password:
+                requires_password = manifest.get("requires_password", True)
+                if requires_password and not password:
                     raise ValueError("The transfer password is required")
                 staged_vault = imported_data / "authorized-source-vault.dopie"
                 staged_key = imported_data / "authorized-source-vault.key"
                 VaultStore(staged_vault, staged_key).import_from_transfer(
-                    imported_vault.read_bytes(), password
+                    imported_vault.read_bytes(), password if requires_password else ""
                 )
                 staged_vault.replace(self.paths.vault)
                 staged_key.replace(self.paths.vault_key)

@@ -487,20 +487,23 @@ class SliceManagerPage(QWidget):
             password, accepted = QInputDialog.getText(
                 self,
                 "Protect Private Sources",
-                "Transfer password",
+                "Transfer password (optional; leave blank to include credentials without password protection)",
                 QLineEdit.Password,
             )
-            if not accepted or not password:
+            if not accepted:
                 return
-            confirmation, confirmed = QInputDialog.getText(
-                self,
-                "Protect Private Sources",
-                "Confirm transfer password",
-                QLineEdit.Password,
-            )
-            if not confirmed or password != confirmation:
-                QMessageBox.warning(self, "Protect Private Sources", "Transfer passwords do not match.")
-                return
+            if password:
+                confirmation, confirmed = QInputDialog.getText(
+                    self,
+                    "Protect Private Sources",
+                    "Confirm transfer password",
+                    QLineEdit.Password,
+                )
+                if not confirmed:
+                    return
+                if password != confirmation:
+                    QMessageBox.warning(self, "Protect Private Sources", "Transfer passwords do not match.")
+                    return
         try:
             PortableProfileService(self.backend.context.paths).export_portable_copy(
                 destination_path,
