@@ -133,3 +133,30 @@ def test_prepares_application_update_without_touching_active_source(tmp_path, mo
     assert state["version"] == "0.2.0"
     assert (updates / "prepared" / "src" / "dopie" / "__init__.py").exists()
     assert json.loads((updates / "pending.json").read_text(encoding="utf-8"))["revision"] == "abcdef1234"
+
+
+def test_managed_application_keeps_its_revision_inside_a_newer_checkout(tmp_path, monkeypatch):
+    checkout = tmp_path / "project"
+    project = checkout / "application" / "versions" / "1.1.3-old-revision"
+    project.mkdir(parents=True)
+    checkout.joinpath(".git").mkdir()
+    state = checkout / "application" / "current.json"
+    installed = {
+        "version": "1.1.3",
+        "revision": "old-revision",
+        "path": str(project),
+        "previous": {"version": "1.1.2", "revision": "previous-revision", "path": "previous"},
+    }
+    state.write_text(json.dumps(installed), encoding="utf-8")
+    source = SourceDefinition("dopie", "DoPie", "https://github.com/owner/dopie")
+    monkeypatch.setattr(RemoteRepositoryClient, "resolve_revision", lambda self: "checkout-revision")
+    monkeypatch.setattr("dopie.updates.service.shutil.which", lambda executable: f"/usr/bin/{executable}")
+    monkeypatch.setattr(
+        "dopie.updates.service.subprocess.run",
+        lambda *args, **kwargs: SimpleNamespace(stdout="checkout-revision\n"),
+    )
+
+    revision = ApplicationUpdateService(tmp_path / "updates", state, project).check_for_update(source)
+
+    assert revision == "checkout-revision"
+    assert json.loads(state.read_text(encoding="utf-8")) == installed

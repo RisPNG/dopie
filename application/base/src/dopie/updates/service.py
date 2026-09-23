@@ -35,6 +35,7 @@ class ApplicationUpdateService:
                 path
                 for path in (self.active_application, *self.active_application.parents)
                 if (path / ".git").exists()
+                and self.active_application in (path, path / "application" / "base")
             ),
             None,
         )
