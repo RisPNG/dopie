@@ -42,20 +42,7 @@ url = "https://example.test/model.bin"
 sha256 = "sha256:replace-with-asset-digest"
 ```
 
-Supported input types are `text`, `multiline`, `password`, `integer`, `choice`, `boolean`, `file`, `files`, and `directory`. `_assets` is reserved by the Pie.
-
-`file` and `directory` deliver a single path string. `files` provides a multiple-file picker and an editable list of paths, one per line, and delivers a list of nonblank path strings. A required `files` input must contain at least one path. `file` and `files` accept an optional Qt file-dialog `filter`:
-
-```toml
-[[inputs]]
-id = "pdf_files"
-label = "PDF files"
-type = "files"
-filter = "PDF files (*.pdf);;All files (*)"
-placeholder = "Select PDF files or paste their paths, one per line"
-```
-
-Earlier DoPie versions display unknown input types as text fields. A Slice that supports those versions can accept a path string as well as the `files` list; multiple paths can be supplied through a separate `multiline` input on those versions.
+Supported input types are `text`, `multiline`, `integer`, `choice`, `boolean`, `file`, and `directory`. `_assets` is reserved by the Pie.
 
 The operation receives `inputs`, `progress`, and `log`:
 

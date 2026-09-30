@@ -65,25 +65,15 @@ class StandardSliceWidget(QWidget):
             elif field_type == "boolean":
                 widget = QCheckBox()
                 widget.setChecked(bool(definition.get("default", False)))
-            elif field_type in {"file", "files", "directory"}:
+            elif field_type in {"file", "directory"}:
                 row = QWidget()
                 row_layout = QHBoxLayout(row)
                 row_layout.setContentsMargins(0, 0, 0, 0)
-                widget = QPlainTextEdit() if field_type == "files" else QLineEdit()
+                widget = QLineEdit()
                 browse = QPushButton("Browse")
-                file_filter = str(definition.get("filter", ""))
-                if field_type == "files":
-                    widget.setPlaceholderText(str(definition.get("placeholder", "")))
+                if field_type == "file":
                     browse.clicked.connect(
-                        lambda checked=False, target=widget, file_filter=file_filter: target.setPlainText(
-                            "\n".join(QFileDialog.getOpenFileNames(self, filter=file_filter)[0]) or target.toPlainText()
-                        )
-                    )
-                elif field_type == "file":
-                    browse.clicked.connect(
-                        lambda checked=False, target=widget, file_filter=file_filter: target.setText(
-                            QFileDialog.getOpenFileName(self, filter=file_filter)[0]
-                        )
+                        lambda checked=False, target=widget: target.setText(QFileDialog.getOpenFileName(self)[0])
                     )
                 else:
                     browse.clicked.connect(
@@ -128,9 +118,7 @@ class StandardSliceWidget(QWidget):
             field_id = str(definition["id"])
             field_type = str(definition.get("type", "text"))
             widget = self.fields[field_id]
-            if field_type == "files":
-                inputs[field_id] = [line.strip() for line in widget.toPlainText().splitlines() if line.strip()]
-            elif field_type == "multiline":
+            if field_type == "multiline":
                 inputs[field_id] = widget.toPlainText()
             elif field_type == "integer":
                 inputs[field_id] = widget.value()
@@ -140,7 +128,7 @@ class StandardSliceWidget(QWidget):
                 inputs[field_id] = widget.isChecked()
             else:
                 inputs[field_id] = widget.text()
-            if definition.get("required") and inputs[field_id] in ("", None, []):
+            if definition.get("required") and inputs[field_id] in {"", None}:
                 self.status.setText(f"{definition.get('label', field_id)} is required.")
                 return
         self.inputs = inputs
