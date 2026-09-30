@@ -29,6 +29,7 @@ from dopie.library.frontend import LibraryPage
 from dopie.models import SourceDefinition
 from dopie.preferences.backend import PreferencesBackend
 from dopie.preferences.frontend import PreferencesDialog
+from dopie.shared_folder import shared_folder_transaction
 from dopie.slice_manager.backend import SliceManagerBackend
 from dopie.slice_manager.frontend import SliceManagerPage
 from dopie.theme import ThemeController
@@ -213,8 +214,14 @@ class MainWindow(QMainWindow):
         self.context.settings.save(settings)
 
     def check_for_updates(self, interactive: bool = True) -> None:
-        configured = self.context.shared_settings.load()["application_update_source"]
-        if not configured.get("repository_url") and not configured.get("repository"):
+        with shared_folder_transaction(self.context.paths.data / ".configuration.lock"):
+            configured = self.context.shared_settings.load()["application_update_source"]
+            if configured.get("repository_url") or configured.get("repository"):
+                source = SourceDefinition.from_dict(configured)
+                token = self.context.vault.source_credential(source.credential)
+            else:
+                source = None
+        if source is None:
             if interactive:
                 QMessageBox.information(
                     self,
@@ -222,8 +229,6 @@ class MainWindow(QMainWindow):
                     "Configure an application repository in Preferences first.",
                 )
             return
-        source = SourceDefinition.from_dict(configured)
-        token = self.context.vault.source_credential(source.credential)
         service = ApplicationUpdateService(
             self.context.paths.updates,
             self.context.paths.project / "application" / "current.json",

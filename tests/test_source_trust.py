@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
+import stat
 import zipfile
+from pathlib import Path
 
 import pytest
 
@@ -129,11 +131,15 @@ def test_import_replaces_the_shared_sources_and_merges_the_importers_preferences
     monkeypatch.setenv("LOGNAME", "alice")
     paths = resolve_app_paths()
     VaultStore(paths.vault, paths.vault_key).seal({"credentials": {"old": "old"}})
+    existing_key = paths.vault_key.read_bytes()
+    existing_key_mode = stat.S_IMODE(paths.vault_key.stat().st_mode)
 
     PortableProfileService(paths).import_portable_profile(profile, "transfer password")
 
     assert [source.id for source in SourceStore(paths.sources).load()] == ["private"]
     assert VaultStore(paths.vault, paths.vault_key).unlock() == {"credentials": {"source:private": "token-value"}}
+    assert paths.vault_key.read_bytes() == existing_key
+    assert stat.S_IMODE(paths.vault_key.stat().st_mode) == existing_key_mode
     assert SettingsStore(paths.shared_settings, DEFAULT_SHARED_SETTINGS).load()["application_update_source"][
         "repository_url"
     ] == "https://github.com/RisPNG/dopie"
@@ -189,3 +195,76 @@ def test_export_carries_the_shared_update_repository(tmp_path, monkeypatch):
     assert manifest["version"] == 2
     assert "data/sources.json" in names
     assert preferences["application_update_source"]["repository_url"] == "https://git.example.test/team/dopie"
+
+
+@pytest.mark.parametrize("corrupt", ["settings", "shared_settings"])
+def test_import_checks_existing_preferences_before_replacing_shared_configuration(tmp_path, monkeypatch, corrupt):
+    monkeypatch.setenv("DOPIE_ROOT", str(tmp_path))
+    paths = resolve_app_paths()
+    paths.sources.write_text(
+        '[{"id":"old","name":"Old","repository_url":"https://github.com/owner/old"}]', encoding="utf-8"
+    )
+    VaultStore(paths.vault, paths.vault_key).store_source_credential("source:old", "original-token")
+    getattr(paths, corrupt).write_text("invalid json", encoding="utf-8")
+    tracked = (paths.sources, paths.vault, paths.vault_key, paths.settings, paths.shared_settings)
+    original = {path: path.read_bytes() if path.exists() else None for path in tracked}
+    profile = tmp_path / "replacement.dopie-profile"
+    with zipfile.ZipFile(profile, "w") as archive:
+        archive.writestr(
+            "profile.json", json.dumps({"format": "dopie-portable-profile", "version": 2, "private_sources": False})
+        )
+        archive.writestr("data/sources.json", "[]")
+        archive.writestr("data/preferences.json", '{"theme":"light"}')
+
+    with pytest.raises(json.JSONDecodeError):
+        PortableProfileService(paths).import_portable_profile(profile)
+
+    assert {path: path.read_bytes() if path.exists() else None for path in tracked} == original
+    assert not list(paths.data.glob("dopie-profile-*"))
+
+
+@pytest.mark.parametrize("private, existing_vault", [(False, True), (True, True), (True, False)])
+def test_import_restores_every_file_if_publishing_preferences_fails(tmp_path, monkeypatch, private, existing_vault):
+    monkeypatch.setenv("DOPIE_ROOT", str(tmp_path))
+    paths = resolve_app_paths()
+    sources = SourceStore(paths.sources)
+    sources.save([])
+    SettingsStore(paths.settings).save({"theme": "dark", "favorites": ["owned"]})
+    SettingsStore(paths.shared_settings, DEFAULT_SHARED_SETTINGS).save({"application_update_source": {"id": "old"}})
+    vault = VaultStore(paths.vault, paths.vault_key)
+    vault.store_source_credential("source:old", "original-token")
+    transferred = vault.export_for_transfer("") if private else None
+    original_key_mode = stat.S_IMODE(paths.vault_key.stat().st_mode)
+    if not existing_vault:
+        paths.vault.unlink()
+        paths.vault_key.unlink()
+    tracked = (paths.sources, paths.vault, paths.vault_key, paths.settings, paths.shared_settings)
+    original = {path: path.read_bytes() if path.exists() else None for path in tracked}
+    profile = tmp_path / "replacement.dopie-profile"
+    with zipfile.ZipFile(profile, "w") as archive:
+        archive.writestr(
+            "profile.json", json.dumps({
+                "format": "dopie-portable-profile", "version": 2,
+                "private_sources": private, "requires_password": False,
+            })
+        )
+        archive.writestr("data/sources.json", "[]")
+        archive.writestr("data/preferences.json", '{"theme":"light"}')
+        if private:
+            archive.writestr("data/source-vault.dopie", transferred)
+    replace = Path.replace
+
+    def publish(path, destination):
+        if destination == paths.settings:
+            raise PermissionError("Preferences are in use")
+        return replace(path, destination)
+
+    monkeypatch.setattr(Path, "replace", publish)
+    with pytest.raises(PermissionError, match="Preferences are in use"):
+        PortableProfileService(paths).import_portable_profile(profile)
+
+    assert {path: path.read_bytes() if path.exists() else None for path in tracked} == original
+    if existing_vault:
+        assert stat.S_IMODE(paths.vault_key.stat().st_mode) == original_key_mode
+        assert vault.unlock() == {"credentials": {"source:old": "original-token"}}
+    assert not list(paths.data.glob("dopie-profile-*"))

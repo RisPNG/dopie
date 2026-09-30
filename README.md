@@ -41,4 +41,6 @@ The first start after an update that changes DoPie's dependencies, and the first
 
 On Linux, mount the share through the kernel with CIFS or NFS rather than opening a file manager `smb://` location, and run it on computers with a similar distribution generation. On a share with POSIX permissions, give the folder a team group so that everyone can keep writing to it: `chgrp -R team DoPie`, `chmod -R g+rwX,o-rwx DoPie`, and `find DoPie -type d -exec chmod g+s {} +`. `start-dopie.sh` keeps new files group-writable.
 
+The share must support byte-range file locking; Linux clients using CIFS need kernel 5.5 or later for these locks to reach the server. DoPie coordinates configuration changes, legacy profile adoption, provisioning, and update activation through shared locks. Initial runtime setup leaves a pending update for the first application launch, so startup failures can still restore the previous version.
+
 See [the Slice contract](application/base/docs/SLICES.md), and [the Source format](application/base/docs/SOURCES.md).

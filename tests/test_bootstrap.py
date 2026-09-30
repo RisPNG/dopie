@@ -1,13 +1,15 @@
 from __future__ import annotations
 
-import errno
 import importlib.util
 import json
 import os
 import subprocess
 import sys
 import tempfile
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -28,14 +30,35 @@ def application_folder(path: Path) -> Path:
     return path
 
 
+def test_bootstrap_loads_without_application_sources(tmp_path, bootstrap):
+    isolated = tmp_path / "bootstrap.py"
+    isolated.write_text(Path(bootstrap.__file__).read_text(encoding="utf-8"), encoding="utf-8")
+
+    loaded = subprocess.run(
+        [
+            sys.executable,
+            "-I",
+            "-B",
+            "-c",
+            "import runpy, sys; runpy.run_path(sys.argv[1]); "
+            "print(any(name == 'dopie' or name.startswith('dopie.') for name in sys.modules))",
+            str(isolated),
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+
+    assert loaded.stdout.strip() == "False"
+
+
 @pytest.mark.parametrize(
     "recorded",
     ["Z:\\Else\\DoPie\\data\\updates\\prepared-12345678", "/mnt/other/DoPie/data/updates/prepared-12345678"],
 )
 def test_activates_an_update_prepared_through_another_path(tmp_path, bootstrap, recorded):
     base = application_folder(tmp_path / "application" / "base")
-    prepared = tmp_path / "data" / "updates" / "prepared-12345678"
-    prepared.mkdir(parents=True)
+    prepared = application_folder(tmp_path / "data" / "updates" / "prepared-12345678")
     prepared.joinpath("pyproject.toml").write_text("prepared", encoding="utf-8")
     pending = prepared.parent / "pending.json"
     pending.write_text(json.dumps({"version": "0.2.0", "revision": "1234567890", "path": recorded}), encoding="utf-8")
@@ -51,14 +74,13 @@ def test_activates_an_update_prepared_through_another_path(tmp_path, bootstrap, 
     assert current["previous"]["path"] == str(base)
 
 
-def test_a_concurrent_launch_does_not_activate_the_same_update_twice(tmp_path, bootstrap, monkeypatch):
+def test_an_already_activated_update_does_not_change_its_previous_version(tmp_path, bootstrap):
     application_folder(tmp_path / "application" / "base")
     destination = application_folder(tmp_path / "application" / "versions" / "0.2.0-12345678")
     current_path = tmp_path / "application" / "current.json"
     current = {"version": "0.2.0", "revision": "1234567890", "path": str(destination), "previous": {"path": "base"}}
     current_path.write_text(json.dumps(current), encoding="utf-8")
-    prepared = tmp_path / "data" / "updates" / "prepared-12345678"
-    prepared.mkdir(parents=True)
+    prepared = application_folder(tmp_path / "data" / "updates" / "prepared-12345678")
     pending = prepared.parent / "pending.json"
     pending.write_text(
         json.dumps({"version": "0.2.0", "revision": "1234567890", "path": str(prepared)}), encoding="utf-8"
@@ -71,22 +93,83 @@ def test_a_concurrent_launch_does_not_activate_the_same_update_twice(tmp_path, b
     assert json.loads(current_path.read_text(encoding="utf-8")) == current
 
 
-def test_losing_the_activation_race_to_another_launch_is_not_an_error(tmp_path, bootstrap, monkeypatch):
-    application_folder(tmp_path / "application" / "base")
+def test_concurrent_threads_activate_a_pending_update_once(tmp_path, bootstrap):
+    base = application_folder(tmp_path / "application" / "base")
     destination = tmp_path / "application" / "versions" / "0.2.0-12345678"
-    prepared = tmp_path / "data" / "updates" / "prepared-12345678"
-    prepared.mkdir(parents=True)
+    prepared = application_folder(tmp_path / "data" / "updates" / "prepared-12345678")
     prepared.parent.joinpath("pending.json").write_text(
         json.dumps({"version": "0.2.0", "revision": "1234567890", "path": str(prepared)}), encoding="utf-8"
     )
 
-    def lose_race(self, target):
-        application_folder(Path(target))
-        raise OSError(errno.ENOTEMPTY, "Directory not empty")
+    ready = threading.Barrier(2)
 
-    monkeypatch.setattr(Path, "rename", lose_race)
+    def launch():
+        ready.wait(timeout=10)
+        return bootstrap.activate_prepared_update(tmp_path)
 
-    assert bootstrap.activate_prepared_update(tmp_path) == (destination, True)
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        launches = [executor.submit(launch) for _ in range(2)]
+        outcomes = [launch.result(timeout=10) for launch in launches]
+
+    assert sorted(activated for _, activated in outcomes) == [False, True]
+    assert all(application == destination for application, _ in outcomes)
+    assert not prepared.exists()
+    current = json.loads((tmp_path / "application" / "current.json").read_text(encoding="utf-8"))
+    assert current["previous"]["path"] == str(base)
+
+
+def test_concurrent_processes_activate_a_pending_update_once(tmp_path, bootstrap):
+    base = application_folder(tmp_path / "application" / "base")
+    prepared = application_folder(tmp_path / "data" / "updates" / "prepared-12345678")
+    prepared.parent.joinpath("pending.json").write_text(
+        json.dumps({"version": "0.2.0", "revision": "1234567890", "path": str(prepared)}), encoding="utf-8"
+    )
+    program = """
+import importlib.util
+import json
+import sys
+from pathlib import Path
+
+spec = importlib.util.spec_from_file_location("bootstrap", sys.argv[1])
+bootstrap = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(bootstrap)
+print("ready", flush=True)
+sys.stdin.readline()
+application, activated = bootstrap.activate_prepared_update(Path(sys.argv[2]))
+print(json.dumps([str(application), activated]), flush=True)
+"""
+    processes = [
+        subprocess.Popen(
+            [sys.executable, "-c", program, bootstrap.__file__, str(tmp_path)],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        for _ in range(2)
+    ]
+    try:
+        for process in processes:
+            assert process.stdout.readline().strip() == "ready"
+        for process in processes:
+            process.stdin.write("start\n")
+            process.stdin.flush()
+        outcomes = []
+        for process in processes:
+            output, error = process.communicate(timeout=10)
+            assert process.returncode == 0, error
+            outcomes.append(json.loads(output))
+    finally:
+        for process in processes:
+            if process.poll() is None:
+                process.kill()
+            process.communicate(timeout=10)
+
+    assert sorted(activated for _, activated in outcomes) == [False, True]
+    destination = tmp_path / "application" / "versions" / "0.2.0-12345678"
+    assert all(application == str(destination) for application, _ in outcomes)
+    current = json.loads((tmp_path / "application" / "current.json").read_text(encoding="utf-8"))
+    assert current["previous"]["path"] == str(base)
     assert not prepared.exists()
 
 
@@ -142,7 +225,7 @@ def test_only_the_launch_that_activated_an_update_rolls_it_back(tmp_path, bootst
     previous.mkdir()
     launches = iter([(1, False), (0, True)])
     restored: list[Path] = []
-    monkeypatch.setattr(bootstrap, "activate_prepared_update", lambda root: (current, True))
+    monkeypatch.setattr(bootstrap, "activate_prepared_update", lambda root, prepare_only=False: (current, True))
     monkeypatch.setattr(bootstrap, "prepare_application_environment", lambda root, application: application / "lib")
     monkeypatch.setattr(bootstrap, "launch_application", lambda root, application, packages: next(launches))
     monkeypatch.setattr(
@@ -157,7 +240,7 @@ def test_only_the_launch_that_activated_an_update_rolls_it_back(tmp_path, bootst
     assert bootstrap.main(tmp_path) == 0
     assert restored == []
 
-    monkeypatch.setattr(bootstrap, "activate_prepared_update", lambda root: (current, False))
+    monkeypatch.setattr(bootstrap, "activate_prepared_update", lambda root, prepare_only=False: (current, False))
     monkeypatch.setattr(bootstrap, "launch_application", lambda root, application, packages: (1, False))
     assert bootstrap.main(tmp_path) == 1
     assert restored == []
@@ -186,6 +269,88 @@ def test_prepare_only_builds_environment_without_launching_application(tmp_path,
 
     assert bootstrap.main(tmp_path, prepare_only=True) == 0
     assert prepared == [(tmp_path, application)]
+
+
+def test_prepare_only_preserves_a_pending_update_for_startup_and_rollback(tmp_path, bootstrap, monkeypatch):
+    base = application_folder(tmp_path / "application" / "base")
+    prepared = application_folder(tmp_path / "data" / "updates" / "prepared-12345678")
+    pending = prepared.parent / "pending.json"
+    state = {"version": "0.2.0", "revision": "1234567890", "path": str(prepared)}
+    pending.write_text(json.dumps(state), encoding="utf-8")
+    prepared_applications = []
+    launches = []
+    destination = tmp_path / "application" / "versions" / "0.2.0-12345678"
+    monkeypatch.setattr(
+        bootstrap,
+        "prepare_application_environment",
+        lambda root, application: prepared_applications.append(application) or application,
+    )
+
+    def launch(root, application, packages):
+        launches.append(application)
+        return (1, False) if application == destination else (0, True)
+
+    monkeypatch.setattr(bootstrap, "launch_application", launch)
+
+    assert bootstrap.main(tmp_path, prepare_only=True) == 0
+    assert prepared_applications == [base]
+    assert prepared.exists()
+    assert json.loads(pending.read_text(encoding="utf-8")) == state
+    assert not launches
+
+    assert bootstrap.main(tmp_path) == 0
+    assert launches == [destination, base]
+    assert prepared_applications == [base, destination, base]
+    assert not pending.exists()
+    current = json.loads((tmp_path / "application" / "current.json").read_text(encoding="utf-8"))
+    assert current["path"] == str(base)
+
+
+def test_rollback_finishes_before_a_new_update_activates(tmp_path, bootstrap, monkeypatch):
+    base = application_folder(tmp_path / "application" / "base")
+    failed = application_folder(tmp_path / "application" / "versions" / "0.2.0-12345678")
+    current_path = tmp_path / "application" / "current.json"
+    current_path.write_text(
+        json.dumps({"version": "0.2.0", "path": str(failed), "previous": {"path": str(base)}}), encoding="utf-8"
+    )
+    prepared = application_folder(tmp_path / "data" / "updates" / "prepared-abcdef12")
+    prepared.parent.joinpath("pending.json").write_text(
+        json.dumps({"version": "0.3.0", "revision": "abcdef1234", "path": str(prepared)}), encoding="utf-8"
+    )
+    rollback_publishing = threading.Event()
+    activation_attempted = threading.Event()
+    activation_finished = threading.Event()
+    replace = Path.replace
+
+    def publish(self, destination):
+        if Path(destination) == current_path and json.loads(self.read_text(encoding="utf-8"))["path"] == str(base):
+            rollback_publishing.set()
+            assert activation_attempted.wait(timeout=5)
+            assert not activation_finished.wait(timeout=0.1)
+        return replace(self, destination)
+
+    def activate():
+        assert rollback_publishing.wait(timeout=5)
+        activation_attempted.set()
+        outcome = bootstrap.activate_prepared_update(tmp_path)
+        activation_finished.set()
+        return outcome
+
+    monkeypatch.setattr(Path, "replace", publish)
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        rollback = executor.submit(bootstrap.restore_previous_application, tmp_path, failed)
+        activation = executor.submit(activate)
+        assert rollback.result(timeout=5) == base
+        destination, activated = activation.result(timeout=5)
+
+    assert activated
+    assert activation_finished.is_set()
+    assert current_path.exists()
+    current = json.loads(current_path.read_text(encoding="utf-8"))
+    assert current["path"] == str(destination)
+    assert current["previous"]["path"] == str(base)
+    assert bootstrap.restore_previous_application(tmp_path, failed) is None
+    assert json.loads(current_path.read_text(encoding="utf-8")) == current
 
 
 def test_application_packages_are_built_once_into_a_relocatable_folder(tmp_path, bootstrap, monkeypatch):
@@ -268,8 +433,7 @@ def test_each_launch_reports_its_health_through_its_own_local_marker(tmp_path, b
 
 def test_an_update_whose_switch_failed_is_completed_by_the_next_launch(tmp_path, bootstrap, monkeypatch):
     application_folder(tmp_path / "application" / "base")
-    prepared = tmp_path / "data" / "updates" / "prepared-12345678"
-    prepared.mkdir(parents=True)
+    prepared = application_folder(tmp_path / "data" / "updates" / "prepared-12345678")
     pending = prepared.parent / "pending.json"
     pending.write_text(
         json.dumps({"version": "0.2.0", "revision": "1234567890", "path": str(prepared)}), encoding="utf-8"
@@ -285,8 +449,75 @@ def test_an_update_whose_switch_failed_is_completed_by_the_next_launch(tmp_path,
     with pytest.raises(PermissionError):
         bootstrap.activate_prepared_update(tmp_path)
     assert pending.exists()
+    assert not list((tmp_path / "application").glob("current.*.tmp"))
 
     monkeypatch.setattr(Path, "replace", replace)
     destination = tmp_path / "application" / "versions" / "0.2.0-12345678"
     assert bootstrap.activate_prepared_update(tmp_path) == (destination, True)
     assert not pending.exists()
+
+
+@pytest.mark.parametrize("operation", ["activate", "restore"])
+@pytest.mark.parametrize("fail_publication", [False, True])
+def test_windows_update_transactions_unlock_their_handle_after_publication(
+    tmp_path, bootstrap, monkeypatch, operation, fail_publication
+):
+    base = application_folder(tmp_path / "application" / "base")
+    project = base / "pyproject.toml"
+    project.write_text('[project]\nversion = "0.1.0"\n', encoding="utf-8")
+    current_path = base.parent / "current.json"
+    destination = base.parent / "versions" / "0.2.0-12345678"
+    if operation == "activate":
+        prepared = application_folder(tmp_path / "data" / "updates" / "prepared-12345678")
+        prepared.parent.joinpath("pending.json").write_text(
+            json.dumps({"version": "0.2.0", "revision": "1234567890", "path": str(prepared)}), encoding="utf-8"
+        )
+    else:
+        application_folder(destination)
+        current_path.write_text(
+            json.dumps({"version": "0.2.0", "path": str(destination), "previous": {"path": str(base)}}),
+            encoding="utf-8",
+        )
+    calls = []
+    project_handles = []
+
+    def locking(handle, mode, length):
+        calls.append((handle, mode, length, os.fstat(handle).st_ino))
+
+    open_file = Path.open
+
+    def open_path(self, *args, **kwargs):
+        stream = open_file(self, *args, **kwargs)
+        if self == project:
+            project_handles.append(stream.fileno())
+        return stream
+
+    replace = Path.replace
+
+    def publish(self, target):
+        if fail_publication and Path(target) == current_path:
+            raise PermissionError("current application is locked")
+        return replace(self, target)
+
+    monkeypatch.setattr(bootstrap, "os", SimpleNamespace(name="nt"))
+    monkeypatch.setitem(sys.modules, "msvcrt", SimpleNamespace(locking=locking, LK_NBLCK="acquire", LK_UNLCK="release"))
+    monkeypatch.setattr(Path, "open", open_path)
+    monkeypatch.setattr(Path, "replace", publish)
+    if fail_publication:
+        with pytest.raises(PermissionError, match="current application is locked"):
+            if operation == "activate":
+                bootstrap.activate_prepared_update(tmp_path)
+            else:
+                bootstrap.restore_previous_application(tmp_path, destination)
+    elif operation == "activate":
+        assert bootstrap.activate_prepared_update(tmp_path) == (destination, True)
+    else:
+        assert bootstrap.restore_previous_application(tmp_path, destination) == base
+
+    assert [(mode, length) for _, mode, length, _ in calls] == [("acquire", 1), ("release", 1)]
+    assert calls[0][0] == calls[1][0]
+    assert {inode for _, _, _, inode in calls} == {(base.parent / ".updates.lock").stat().st_ino}
+    if operation == "activate":
+        assert len(project_handles) == 1
+        assert project_handles[0] != calls[0][0]
+    assert not list(base.parent.glob("current.*.tmp"))

@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import os
 import stat
+import threading
+import time
+from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 from cryptography.exceptions import InvalidTag
@@ -70,3 +73,56 @@ def test_credential_changes_keep_credentials_added_by_another_user(tmp_path):
     second.store_source_credential("source:second", "rotated-token")
     assert first.source_credential("source:second") == "rotated-token"
     assert first.source_credential(None) is None
+
+
+def test_users_create_one_vault_and_keep_all_concurrent_credentials(tmp_path, monkeypatch):
+    start = threading.Barrier(8)
+    generated_keys = []
+    urandom = os.urandom
+
+    def generate(length):
+        if length == 32:
+            generated_keys.append(True)
+            time.sleep(0.02)
+        return urandom(length)
+
+    def add_credential(index):
+        start.wait(timeout=5)
+        VaultStore(tmp_path / "source-vault.dopie", tmp_path / "source-vault.key").store_source_credential(
+            f"source:{index}", f"token-{index}"
+        )
+
+    monkeypatch.setattr(os, "urandom", generate)
+    with ThreadPoolExecutor(max_workers=8) as users:
+        list(users.map(add_credential, range(8)))
+
+    vault = VaultStore(tmp_path / "source-vault.dopie", tmp_path / "source-vault.key")
+    assert vault.unlock() == {"credentials": {f"source:{index}": f"token-{index}" for index in range(8)}}
+    assert generated_keys == [True]
+    assert not list(tmp_path.glob("*.tmp"))
+
+
+def test_users_keep_each_others_concurrent_changes_to_an_existing_vault(tmp_path, monkeypatch):
+    vault = VaultStore(tmp_path / "source-vault.dopie", tmp_path / "source-vault.key")
+    vault.store_source_credential("source:existing", "original")
+    key = vault.key_path.read_bytes()
+    start = threading.Barrier(8)
+    unlock = VaultStore.unlock
+
+    def read_credentials(self):
+        secrets = unlock(self)
+        time.sleep(0.01)
+        return secrets
+
+    def add_credential(index):
+        start.wait(timeout=5)
+        VaultStore(vault.path, vault.key_path).store_source_credential(f"source:{index}", f"token-{index}")
+
+    monkeypatch.setattr(VaultStore, "unlock", read_credentials)
+    with ThreadPoolExecutor(max_workers=8) as users:
+        list(users.map(add_credential, range(8)))
+
+    assert vault.unlock() == {
+        "credentials": {"source:existing": "original", **{f"source:{index}": f"token-{index}" for index in range(8)}}
+    }
+    assert vault.key_path.read_bytes() == key

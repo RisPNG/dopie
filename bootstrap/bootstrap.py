@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import errno
 import hashlib
 import json
 import os
@@ -7,6 +8,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import tomllib
 import uuid
 from pathlib import Path, PureWindowsPath
@@ -19,51 +21,81 @@ def recorded_application(root: Path, recorded: str) -> Path:
     return application if (application / "requirements.lock").exists() else base
 
 
-def activate_prepared_update(root: Path) -> tuple[Path, bool]:
+def activate_prepared_update(root: Path, prepare_only: bool = False) -> tuple[Path, bool]:
     application = root / "application"
     base = application / "base"
     current_path = application / "current.json"
     pending_path = root / "data" / "updates" / "pending.json"
-    current = json.loads(current_path.read_text(encoding="utf-8")) if current_path.exists() else None
-    try:
-        pending = json.loads(pending_path.read_text(encoding="utf-8"))
-    except FileNotFoundError:
-        pending = None
-    if pending is not None:
-        destination = application / "versions" / f"{pending['version']}-{pending['revision'][:8]}"
-        prepared = root / "data" / "updates" / PureWindowsPath(pending["path"]).name
-        destination.parent.mkdir(parents=True, exist_ok=True)
+    application.mkdir(parents=True, exist_ok=True)
+    with (application / ".updates.lock").open("a+b") as lock_stream:
+        if os.name == "nt":
+            import msvcrt
+
+            lock_stream.seek(0)
+            while True:
+                try:
+                    msvcrt.locking(lock_stream.fileno(), msvcrt.LK_NBLCK, 1)
+                    break
+                except OSError as error:
+                    if error.errno not in (errno.EACCES, errno.EAGAIN, errno.EDEADLK):
+                        raise
+                    time.sleep(0.05)
+        else:
+            import fcntl
+
+            fcntl.flock(lock_stream, fcntl.LOCK_EX)
         try:
-            prepared.rename(destination)
-        except OSError:
-            if not destination.exists():
-                raise
-            shutil.rmtree(prepared, ignore_errors=True)
-        activated = current is None or recorded_application(root, current["path"]) != destination
-        if activated:
-            if current is None:
-                previous_path = base if base.exists() else root
-                project_file = previous_path / "pyproject.toml"
-                if project_file.exists():
-                    with project_file.open("rb") as stream:
-                        previous_version = str(tomllib.load(stream)["project"]["version"])
-                else:
-                    previous_version = "unknown"
-                current = {"version": previous_version, "revision": None, "path": str(previous_path)}
-            state = {
-                "version": pending["version"],
-                "revision": pending["revision"],
-                "path": str(destination),
-                "previous": current,
-            }
-            temporary = current_path.with_suffix(f".{uuid.uuid4().hex}.tmp")
-            temporary.write_text(json.dumps(state, indent=2), encoding="utf-8")
-            temporary.replace(current_path)
-        pending_path.unlink(missing_ok=True)
-        return destination, activated
-    if current is not None:
-        return recorded_application(root, current["path"]), False
-    return (base if base.exists() else root), False
+            current = json.loads(current_path.read_text(encoding="utf-8")) if current_path.exists() else None
+            pending = None
+            if not prepare_only:
+                try:
+                    pending = json.loads(pending_path.read_text(encoding="utf-8"))
+                except FileNotFoundError:
+                    pass
+            if pending is not None:
+                destination = application / "versions" / f"{pending['version']}-{pending['revision'][:8]}"
+                prepared = root / "data" / "updates" / PureWindowsPath(pending["path"]).name
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                try:
+                    prepared.rename(destination)
+                except OSError:
+                    if not destination.exists():
+                        raise
+                    shutil.rmtree(prepared, ignore_errors=True)
+                activated = current is None or recorded_application(root, current["path"]) != destination
+                if activated:
+                    if current is None:
+                        previous_path = base if base.exists() else root
+                        project_file = previous_path / "pyproject.toml"
+                        if project_file.exists():
+                            with project_file.open("rb") as stream:
+                                previous_version = str(tomllib.load(stream)["project"]["version"])
+                        else:
+                            previous_version = "unknown"
+                        current = {"version": previous_version, "revision": None, "path": str(previous_path)}
+                    state = {
+                        "version": pending["version"],
+                        "revision": pending["revision"],
+                        "path": str(destination),
+                        "previous": current,
+                    }
+                    temporary = current_path.with_suffix(f".{uuid.uuid4().hex}.tmp")
+                    try:
+                        temporary.write_text(json.dumps(state, indent=2), encoding="utf-8")
+                        temporary.replace(current_path)
+                    finally:
+                        temporary.unlink(missing_ok=True)
+                pending_path.unlink(missing_ok=True)
+                return destination, activated
+            if current is not None:
+                return recorded_application(root, current["path"]), False
+            return (base if base.exists() else root), False
+        finally:
+            if os.name == "nt":
+                lock_stream.seek(0)
+                msvcrt.locking(lock_stream.fileno(), msvcrt.LK_UNLCK, 1)
+            else:
+                fcntl.flock(lock_stream, fcntl.LOCK_UN)
 
 
 def prepare_application_environment(root: Path, application: Path) -> Path:
@@ -117,19 +149,46 @@ def launch_application(root: Path, application: Path, packages: Path) -> tuple[i
 
 def restore_previous_application(root: Path, failed: Path) -> Path | None:
     current_path = root / "application" / "current.json"
-    current = json.loads(current_path.read_text(encoding="utf-8"))
-    previous = current.get("previous")
-    if not previous or recorded_application(root, current["path"]) != failed:
-        return None
-    temporary = current_path.with_suffix(f".{uuid.uuid4().hex}.tmp")
-    temporary.write_text(json.dumps(previous, indent=2), encoding="utf-8")
-    temporary.replace(current_path)
-    return recorded_application(root, previous["path"])
+    with (current_path.parent / ".updates.lock").open("a+b") as lock_stream:
+        if os.name == "nt":
+            import msvcrt
+
+            lock_stream.seek(0)
+            while True:
+                try:
+                    msvcrt.locking(lock_stream.fileno(), msvcrt.LK_NBLCK, 1)
+                    break
+                except OSError as error:
+                    if error.errno not in (errno.EACCES, errno.EAGAIN, errno.EDEADLK):
+                        raise
+                    time.sleep(0.05)
+        else:
+            import fcntl
+
+            fcntl.flock(lock_stream, fcntl.LOCK_EX)
+        try:
+            current = json.loads(current_path.read_text(encoding="utf-8"))
+            previous = current.get("previous")
+            if not previous or recorded_application(root, current["path"]) != failed:
+                return None
+            temporary = current_path.with_suffix(f".{uuid.uuid4().hex}.tmp")
+            try:
+                temporary.write_text(json.dumps(previous, indent=2), encoding="utf-8")
+                temporary.replace(current_path)
+            finally:
+                temporary.unlink(missing_ok=True)
+            return recorded_application(root, previous["path"])
+        finally:
+            if os.name == "nt":
+                lock_stream.seek(0)
+                msvcrt.locking(lock_stream.fileno(), msvcrt.LK_UNLCK, 1)
+            else:
+                fcntl.flock(lock_stream, fcntl.LOCK_UN)
 
 
 def main(root: Path | None = None, prepare_only: bool = False) -> int:
     root = root or Path(__file__).resolve().parent.parent
-    application, activated = activate_prepared_update(root)
+    application, activated = activate_prepared_update(root, prepare_only=prepare_only)
     try:
         packages = prepare_application_environment(root, application)
         if prepare_only:
@@ -140,8 +199,6 @@ def main(root: Path | None = None, prepare_only: bool = False) -> int:
         if previous is None:
             raise
         packages = prepare_application_environment(root, previous)
-        if prepare_only:
-            return 0
         return launch_application(root, previous, packages)[0]
     if returncode == 0 or healthy or not activated:
         return returncode

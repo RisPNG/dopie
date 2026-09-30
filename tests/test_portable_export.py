@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+import shutil
+import subprocess
+import sys
 import zipfile
+from pathlib import Path
 
 import pytest
 from PySide6.QtWidgets import QApplication, QFileDialog, QInputDialog, QMessageBox
@@ -15,6 +19,7 @@ from dopie.slice_manager.backend import SliceManagerBackend
 from dopie.slice_manager.frontend import SliceManagerPage
 from dopie.slices.discovery import SliceDiscovery
 from dopie.slices.installer import SliceInstaller
+from dopie.sources.profile import PortableProfileService
 from dopie.storage import DEFAULT_SHARED_SETTINGS, SettingsStore, SourceStore
 
 
@@ -85,3 +90,40 @@ def test_private_copy_export_and_first_launch(tmp_path, monkeypatch, responses, 
     finally:
         page.close()
     assert application is not None
+
+
+def test_exporting_an_older_application_keeps_the_bootstrap_independent(tmp_path, monkeypatch):
+    root = tmp_path / "source"
+    older = root / "application" / "versions" / "1.1.6-previous"
+    older.joinpath("src", "dopie").mkdir(parents=True)
+    older.joinpath("src", "dopie", "__init__.py").write_text('__version__ = "1.1.6"\n', encoding="utf-8")
+    older.joinpath("requirements.lock").write_text("", encoding="utf-8")
+    older.joinpath("pyproject.toml").write_text('[project]\nname = "dopie"\nversion = "1.1.6"\n', encoding="utf-8")
+    shutil.copytree(Path(__file__).parents[1] / "bootstrap", root / "bootstrap")
+    monkeypatch.setenv("DOPIE_ROOT", str(root))
+    monkeypatch.setenv("DOPIE_ACTIVE_ROOT", str(older))
+    paths = resolve_app_paths()
+    exported = tmp_path / "copy.zip"
+
+    PortableProfileService(paths).export_portable_copy(exported, "linux")
+
+    with zipfile.ZipFile(exported) as archive:
+        assert "DoPie/application/base/src/dopie/shared_folder.py" not in archive.namelist()
+        archive.extractall(tmp_path / "received")
+    bootstrap = tmp_path / "received" / "DoPie" / "bootstrap" / "bootstrap.py"
+    loaded = subprocess.run(
+        [
+            sys.executable,
+            "-I",
+            "-B",
+            "-c",
+            "import runpy, sys; from pathlib import Path; module = runpy.run_path(sys.argv[1]); "
+            "application, activated = module['activate_prepared_update'](Path(sys.argv[1]).parent.parent); "
+            "print(application.name, activated)",
+            str(bootstrap),
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert loaded.stdout.strip() == "base False"

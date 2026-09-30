@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
 import sys
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from threading import Event, current_thread
 
 import pytest
 from PySide6.QtTest import QTest
@@ -344,3 +347,100 @@ def test_a_catalogue_another_user_refreshed_reaches_this_library(tmp_path, monke
     finally:
         page.close()
     assert application is not None
+
+
+def test_overlapping_source_additions_preserve_both_sources_and_credentials(tmp_path, monkeypatch):
+    alice = open_as("alice", tmp_path, monkeypatch)
+    bob = open_as("bob", tmp_path, monkeypatch)
+    read = Event()
+    release = Event()
+    attempted = Event()
+    load = SourceStore.load
+
+    def pause_first_read(store):
+        sources = load(store)
+        if current_thread().name.startswith("alice"):
+            read.set()
+            assert release.wait(5)
+        return sources
+
+    def add_bobs_source():
+        attempted.set()
+        bob.add_source(OTHER, "other-token")
+
+    monkeypatch.setattr(SourceStore, "load", pause_first_read)
+    with ThreadPoolExecutor(max_workers=1, thread_name_prefix="alice") as first:
+        with ThreadPoolExecutor(max_workers=1, thread_name_prefix="bob") as second:
+            alice_save = first.submit(alice.add_source, PRIVATE, "private-token")
+            try:
+                assert read.wait(5)
+                bob_save = second.submit(add_bobs_source)
+                assert attempted.wait(5)
+                with pytest.raises(TimeoutError):
+                    bob_save.result(timeout=0.1)
+            finally:
+                release.set()
+            alice_save.result(timeout=5)
+            bob_save.result(timeout=5)
+
+    assert {source.id for source in alice.context.sources.load()} == {"private", "other"}
+    assert alice.context.vault.unlock() == {
+        "credentials": {"source:private": "private-token", "source:other": "other-token"}
+    }
+
+
+def test_concurrent_upgrade_starts_adopt_the_legacy_profile_once(tmp_path):
+    data = tmp_path / "data"
+    install_slice(data / "slices", "owned")
+    data.joinpath("preferences.json").write_text(
+        json.dumps({"theme": "dark", "favorites": ["owned"]}), encoding="utf-8"
+    )
+    data.joinpath("slice-environments", "legacy").mkdir(parents=True)
+    script = (
+        "import json, sys\nfrom pathlib import Path\n"
+        "from dopie.paths import resolve_app_paths\n"
+        "from dopie.storage import SettingsStore\n"
+        "print('ready', flush=True)\nsys.stdin.readline()\n"
+        "paths = resolve_app_paths()\n"
+        "print(json.dumps({'slices': [path.name for path in paths.installed_slices.iterdir()], "
+        "'preferences': SettingsStore(paths.settings).load()}), flush=True)\n"
+    )
+    processes = []
+    try:
+        for user in ("alice", "bob"):
+            environment = os.environ.copy()
+            environment["LOGNAME"] = user
+            environment["DOPIE_ROOT"] = str(tmp_path)
+            environment["PYTHONPATH"] = str(Path(__file__).parents[1] / "application" / "base" / "src")
+            process = subprocess.Popen(
+                [sys.executable, "-c", script],
+                env=environment,
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+            processes.append(process)
+        for process in processes:
+            assert process.stdout.readline().strip() == "ready"
+        for process in processes:
+            process.stdin.write("start\n")
+            process.stdin.flush()
+        results = []
+        for process in processes:
+            output, errors = process.communicate(timeout=10)
+            assert process.returncode == 0, errors
+            results.append(json.loads(output))
+        owner = next(result for result in results if result["slices"] == ["owned"])
+        colleague = next(result for result in results if result["slices"] == [])
+        assert owner["preferences"]["favorites"] == ["owned"]
+        assert owner["preferences"]["theme"] == "dark"
+        assert colleague["preferences"]["favorites"] == []
+        assert colleague["preferences"]["theme"] == "system"
+        assert not (data / "slices").exists()
+        assert not (data / "slice-environments" / "legacy").exists()
+    finally:
+        for process in processes:
+            if process.poll() is None:
+                process.kill()
+                process.communicate(timeout=5)

@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from dopie.models import SourceDefinition
+from dopie.shared_folder import shared_folder_transaction
 
 DEFAULT_SETTINGS = {
     "theme": "system",
@@ -35,15 +36,17 @@ class SettingsStore:
         self.defaults = defaults
 
     def load(self) -> dict[str, Any]:
-        stored = json.loads(self.path.read_text(encoding="utf-8")) if self.path.exists() else {}
-        settings = copy.deepcopy(self.defaults)
-        settings.update(stored)
-        return settings
+        with shared_folder_transaction(self.path.parent / ".configuration.lock"):
+            stored = json.loads(self.path.read_text(encoding="utf-8")) if self.path.exists() else {}
+            settings = copy.deepcopy(self.defaults)
+            settings.update(stored)
+            return settings
 
     def save(self, settings: dict[str, Any]) -> None:
-        temporary = self.path.with_suffix(f".{uuid.uuid4().hex}.tmp")
-        temporary.write_text(json.dumps(settings, indent=2), encoding="utf-8")
-        temporary.replace(self.path)
+        with shared_folder_transaction(self.path.parent / ".configuration.lock"):
+            temporary = self.path.with_suffix(f".{uuid.uuid4().hex}.tmp")
+            temporary.write_text(json.dumps(settings, indent=2), encoding="utf-8")
+            temporary.replace(self.path)
 
 
 class SourceStore:
@@ -51,9 +54,10 @@ class SourceStore:
         self.path = path
 
     def load(self) -> list[SourceDefinition]:
-        if not self.path.exists():
-            return []
-        return [SourceDefinition.from_dict(item) for item in json.loads(self.path.read_text(encoding="utf-8"))]
+        with shared_folder_transaction(self.path.parent / ".configuration.lock"):
+            if not self.path.exists():
+                return []
+            return [SourceDefinition.from_dict(item) for item in json.loads(self.path.read_text(encoding="utf-8"))]
 
     def save(self, sources: list[SourceDefinition]) -> None:
         payload = [
@@ -68,6 +72,7 @@ class SourceStore:
             }
             for source in sources
         ]
-        temporary = self.path.with_suffix(f".{uuid.uuid4().hex}.tmp")
-        temporary.write_text(json.dumps(payload, indent=2), encoding="utf-8")
-        temporary.replace(self.path)
+        with shared_folder_transaction(self.path.parent / ".configuration.lock"):
+            temporary = self.path.with_suffix(f".{uuid.uuid4().hex}.tmp")
+            temporary.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+            temporary.replace(self.path)

@@ -6,6 +6,8 @@ import shutil
 from dataclasses import dataclass
 from pathlib import Path
 
+from dopie.shared_folder import shared_folder_transaction
+
 
 @dataclass(frozen=True)
 class AppPaths:
@@ -45,18 +47,19 @@ def resolve_app_paths() -> AppPaths:
     catalog_cache = data / "catalog-cache"
     updates = data / "updates"
     legacy_slices = data / "slices"
-    if legacy_slices.exists() and not installed_slices.exists():
-        user.mkdir(parents=True, exist_ok=True)
-        if (data / "preferences.json").exists():
-            shutil.copyfile(data / "preferences.json", user / "preferences.json")
-        if slice_environments.exists():
-            shutil.rmtree(slice_environments)
-        legacy_slices.rename(installed_slices)
-    installed_slices.mkdir(parents=True, exist_ok=True)
-    slice_environments.mkdir(exist_ok=True)
-    slice_assets.mkdir(exist_ok=True)
-    catalog_cache.mkdir(exist_ok=True)
-    updates.mkdir(exist_ok=True)
+    with shared_folder_transaction(data / ".configuration.lock"):
+        if legacy_slices.exists() and not installed_slices.exists():
+            user.mkdir(parents=True, exist_ok=True)
+            if (data / "preferences.json").exists():
+                shutil.copyfile(data / "preferences.json", user / "preferences.json")
+            if slice_environments.exists():
+                shutil.rmtree(slice_environments)
+            legacy_slices.rename(installed_slices)
+        installed_slices.mkdir(parents=True, exist_ok=True)
+        slice_environments.mkdir(exist_ok=True)
+        slice_assets.mkdir(exist_ok=True)
+        catalog_cache.mkdir(exist_ok=True)
+        updates.mkdir(exist_ok=True)
     return AppPaths(
         project=project,
         active_project=active_project,

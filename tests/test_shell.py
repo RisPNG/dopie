@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import shutil
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from threading import Event
 
+import pytest
 from PySide6.QtCore import QPoint, Qt, QThreadPool
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QAbstractItemView, QApplication, QHeaderView, QLabel, QMessageBox
@@ -19,6 +22,7 @@ from dopie.slice_manager.backend import CatalogRefresh
 from dopie.slice_manager.frontend import DeselectableTreeWidget
 from dopie.slices.discovery import SliceDiscovery
 from dopie.slices.installer import SliceInstaller
+from dopie.sources.profile import PortableProfileService
 from dopie.storage import DEFAULT_SHARED_SETTINGS, SettingsStore, SourceStore
 from dopie.theme import ThemeController
 from dopie.updates.service import ApplicationUpdateService
@@ -160,6 +164,44 @@ def test_shell_builds_all_primary_pages_offscreen(tmp_path, monkeypatch):
     window.check_for_updates(False)
     QThreadPool.globalInstance().waitForDone()
     assert checked == ["https://git.example.test/team/dopie"]
+    profile = tmp_path / "public.dopie-profile"
+    PortableProfileService(paths).export_portable_profile(profile)
+    PreferencesBackend(context).configure_application_updates(
+        SourceDefinition("dopie-application", "DoPie Application", "https://git.example.test/team/private"),
+        "private-update-token",
+    )
+    read = Event()
+    attempted = Event()
+    shared_load = context.shared_settings.load
+    imported = []
+    snapshots = []
+    monkeypatch.setattr(
+        ApplicationUpdateService,
+        "check_for_update",
+        lambda self, source, token=None: snapshots.append((source.repository_url, token)),
+    )
+
+    def replace_with_public_profile():
+        assert read.wait(5)
+        attempted.set()
+        PortableProfileService(paths).import_portable_profile(profile)
+
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        def read_while_profile_is_imported():
+            configured = shared_load()
+            read.set()
+            imported.append(executor.submit(replace_with_public_profile))
+            assert attempted.wait(5)
+            with pytest.raises(TimeoutError):
+                imported[-1].result(timeout=0.1)
+            return configured
+
+        monkeypatch.setattr(context.shared_settings, "load", read_while_profile_is_imported)
+        window.check_for_updates(False)
+        imported[-1].result(timeout=5)
+    QThreadPool.globalInstance().waitForDone()
+    assert snapshots == [("https://git.example.test/team/private", "private-update-token")]
+    assert not paths.vault.exists()
     window.open_slice(window.library.backend.build_library()[0])
     workspace = window.pages.currentWidget()
     workspace.close_requested.emit()

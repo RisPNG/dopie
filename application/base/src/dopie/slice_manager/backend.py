@@ -8,6 +8,7 @@ from dataclasses import asdict, dataclass
 
 from dopie.context import ApplicationContext
 from dopie.models import CatalogSlice, SliceManifest, SourceDefinition
+from dopie.shared_folder import shared_folder_transaction
 from dopie.slices.compatibility import evaluate_slice_compatibility
 from dopie.sources.catalog import SourceCatalog
 from dopie.sources.remote import RemoteRepositoryClient
@@ -103,10 +104,11 @@ class SliceManagerBackend:
         compatibility = evaluate_slice_compatibility(item)
         if not compatibility.compatible:
             raise ValueError(compatibility.reason)
-        source = next((source for source in self.context.sources.load() if source.id == item.source_id), None)
-        if source is None:
-            raise ValueError(f"Source no longer exists: {item.source_id}")
-        token = self.context.vault.source_credential(source.credential)
+        with shared_folder_transaction(self.context.paths.data / ".configuration.lock"):
+            source = next((source for source in self.context.sources.load() if source.id == item.source_id), None)
+            if source is None:
+                raise ValueError(f"Source no longer exists: {item.source_id}")
+            token = self.context.vault.source_credential(source.credential)
         self.context.installer.install_slice(item, source, token, progress)
 
     def uninstall_managed_slice(self, manifest: SliceManifest) -> None:
@@ -120,59 +122,63 @@ class SliceManagerBackend:
         self.context.installer.activate_slice_version(manifest.id, version)
 
     def add_source(self, source: SourceDefinition, token: str | None = None) -> None:
-        sources = self.context.sources.load()
-        if any(existing.id == source.id for existing in sources):
-            raise ValueError(f"Source id already exists: {source.id}")
-        if token and source.credential:
-            self.context.vault.store_source_credential(source.credential, token)
-        sources.append(source)
-        self.context.sources.save(sources)
+        with shared_folder_transaction(self.context.paths.data / ".configuration.lock"):
+            sources = self.context.sources.load()
+            if any(existing.id == source.id for existing in sources):
+                raise ValueError(f"Source id already exists: {source.id}")
+            if token and source.credential:
+                self.context.vault.store_source_credential(source.credential, token)
+            sources.append(source)
+            self.context.sources.save(sources)
 
     def set_source_enabled(self, source_id: str, enabled: bool) -> None:
-        sources = self.context.sources.load()
-        self.context.sources.save(
-            [
-                SourceDefinition(
-                    id=source.id,
-                    name=source.name,
-                    repository_url=source.repository_url,
-                    reference=source.reference,
-                    index=source.index,
-                    credential=source.credential,
-                    enabled=enabled if source.id == source_id else source.enabled,
-                )
-                for source in sources
-            ]
-        )
+        with shared_folder_transaction(self.context.paths.data / ".configuration.lock"):
+            sources = self.context.sources.load()
+            self.context.sources.save(
+                [
+                    SourceDefinition(
+                        id=source.id,
+                        name=source.name,
+                        repository_url=source.repository_url,
+                        reference=source.reference,
+                        index=source.index,
+                        credential=source.credential,
+                        enabled=enabled if source.id == source_id else source.enabled,
+                    )
+                    for source in sources
+                ]
+            )
 
     def update_source(self, original_id: str, updated: SourceDefinition, token: str | None = None) -> None:
-        sources = self.context.sources.load()
-        original = next((source for source in sources if source.id == original_id), None)
-        if original is None:
-            raise ValueError(f"Source no longer exists: {original_id}")
-        if any(source.id == updated.id and source.id != original_id for source in sources):
-            raise ValueError(f"Source id already exists: {updated.id}")
-        if token and updated.credential:
-            self.context.vault.store_source_credential(updated.credential, token)
-        if original.credential and original.credential != updated.credential:
-            self.context.vault.remove_source_credential(original.credential)
-        self.context.sources.save([updated if source.id == original_id else source for source in sources])
-        if original_id != updated.id:
-            original_cache = self.context.paths.catalog_cache / f"{original_id}.json"
-            updated_cache = self.context.paths.catalog_cache / f"{updated.id}.json"
-            if original_cache.exists():
-                original_cache.replace(updated_cache)
-        self.load_cached_catalogs()
+        with shared_folder_transaction(self.context.paths.data / ".configuration.lock"):
+            sources = self.context.sources.load()
+            original = next((source for source in sources if source.id == original_id), None)
+            if original is None:
+                raise ValueError(f"Source no longer exists: {original_id}")
+            if any(source.id == updated.id and source.id != original_id for source in sources):
+                raise ValueError(f"Source id already exists: {updated.id}")
+            if token and updated.credential:
+                self.context.vault.store_source_credential(updated.credential, token)
+            if original.credential and original.credential != updated.credential:
+                self.context.vault.remove_source_credential(original.credential)
+            self.context.sources.save([updated if source.id == original_id else source for source in sources])
+            if original_id != updated.id:
+                original_cache = self.context.paths.catalog_cache / f"{original_id}.json"
+                updated_cache = self.context.paths.catalog_cache / f"{updated.id}.json"
+                if original_cache.exists():
+                    original_cache.replace(updated_cache)
+            self.load_cached_catalogs()
 
     def remove_source(self, source_id: str) -> None:
-        sources = self.context.sources.load()
-        source = next((source for source in sources if source.id == source_id), None)
-        if source is None:
-            raise ValueError(f"Source no longer exists: {source_id}")
-        if source.credential:
-            self.context.vault.remove_source_credential(source.credential)
-        self.context.sources.save([source for source in sources if source.id != source_id])
-        cache = self.context.paths.catalog_cache / f"{source_id}.json"
-        if cache.exists():
-            cache.unlink()
-        self.load_cached_catalogs()
+        with shared_folder_transaction(self.context.paths.data / ".configuration.lock"):
+            sources = self.context.sources.load()
+            source = next((source for source in sources if source.id == source_id), None)
+            if source is None:
+                raise ValueError(f"Source no longer exists: {source_id}")
+            if source.credential:
+                self.context.vault.remove_source_credential(source.credential)
+            self.context.sources.save([source for source in sources if source.id != source_id])
+            cache = self.context.paths.catalog_cache / f"{source_id}.json"
+            if cache.exists():
+                cache.unlink()
+            self.load_cached_catalogs()
