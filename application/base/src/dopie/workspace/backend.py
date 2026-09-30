@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import sys
+import uuid
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -10,9 +11,9 @@ from dopie.models import SliceManifest
 
 @dataclass(frozen=True)
 class EnvironmentPlan:
-    python: Path
+    packages: Path | None
     commands: tuple[tuple[str, ...], ...]
-    marker: Path | None = None
+    staging: Path | None = None
 
 
 class SliceEnvironmentManager:
@@ -21,32 +22,33 @@ class SliceEnvironmentManager:
 
     def prepare_slice_environment(self, manifest: SliceManifest) -> EnvironmentPlan:
         lock = manifest.path / "requirements.lock"
-        dependency_data = lock.read_bytes() if lock.exists() else b""
+        if not lock.exists():
+            return EnvironmentPlan(None, ())
         fingerprint = hashlib.sha256(
-            f"{sys.version_info.major}.{sys.version_info.minor}\n".encode("ascii") + dependency_data
+            f"{sys.version_info.major}.{sys.version_info.minor}\n".encode("ascii") + lock.read_bytes()
         ).hexdigest()[:16]
-        environment = self.environments / manifest.id / fingerprint
-        if sys.platform == "win32":
-            python = environment / "Scripts" / "python.exe"
-        else:
-            python = environment / "bin" / "python"
-        marker = environment / ".ready"
-        if marker.exists() and python.exists():
-            return EnvironmentPlan(python, (), marker)
+        environment = self.environments / ("windows" if sys.platform == "win32" else "linux") / fingerprint
+        if environment.exists():
+            return EnvironmentPlan(environment, ())
         environment.parent.mkdir(parents=True, exist_ok=True)
-        commands: tuple[tuple[str, ...], ...] = ((sys.executable, "-m", "venv", str(environment)),)
-        if lock.exists():
-            commands += (
+        staging = environment.with_name(f".{fingerprint}-{uuid.uuid4().hex[:8]}")
+        return EnvironmentPlan(
+            environment,
+            (
                 (
-                    str(python),
+                    sys.executable,
+                    "-I",
                     "-m",
                     "pip",
                     "install",
                     "--disable-pip-version-check",
                     "--no-cache-dir",
                     "--require-hashes",
+                    "--target",
+                    str(staging),
                     "-r",
                     str(lock),
                 ),
-            )
-        return EnvironmentPlan(python, commands, marker)
+            ),
+            staging,
+        )

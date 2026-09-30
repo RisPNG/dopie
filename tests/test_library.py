@@ -5,7 +5,7 @@ from dataclasses import replace
 
 from PySide6.QtWidgets import QApplication, QPushButton
 
-from dopie.context import ApplicationContext, VaultSession
+from dopie.context import ApplicationContext
 from dopie.library.backend import LibraryBackend, LibraryItem
 from dopie.library.frontend import SliceCard
 from dopie.models import CatalogSlice, SourceDefinition
@@ -14,7 +14,7 @@ from dopie.security.vault import VaultStore
 from dopie.slice_manager.backend import SliceManagerBackend
 from dopie.slices.discovery import SliceDiscovery
 from dopie.slices.installer import SliceInstaller
-from dopie.storage import SettingsStore, SourceStore
+from dopie.storage import DEFAULT_SHARED_SETTINGS, SettingsStore, SourceStore
 
 
 def test_library_includes_available_slices_only_when_enabled(tmp_path, monkeypatch):
@@ -29,8 +29,9 @@ def test_library_includes_available_slices_only_when_enabled(tmp_path, monkeypat
     context = ApplicationContext(
         paths=paths,
         settings=SettingsStore(paths.settings),
+        shared_settings=SettingsStore(paths.shared_settings, DEFAULT_SHARED_SETTINGS),
         sources=SourceStore(paths.sources),
-        vault=VaultSession(VaultStore(paths.vault, paths.vault_key)),
+        vault=VaultStore(paths.vault, paths.vault_key),
         discovery=SliceDiscovery(paths.bundled_slices, paths.installed_slices),
         installer=SliceInstaller(paths.installed_slices),
         available=[
@@ -62,8 +63,9 @@ def test_library_loads_available_slices_from_portable_cache(tmp_path, monkeypatc
     context = ApplicationContext(
         paths=paths,
         settings=SettingsStore(paths.settings),
+        shared_settings=SettingsStore(paths.shared_settings, DEFAULT_SHARED_SETTINGS),
         sources=SourceStore(paths.sources),
-        vault=VaultSession(VaultStore(paths.vault, paths.vault_key)),
+        vault=VaultStore(paths.vault, paths.vault_key),
         discovery=SliceDiscovery(paths.bundled_slices, paths.installed_slices),
         installer=SliceInstaller(paths.installed_slices),
     )
@@ -102,8 +104,9 @@ def test_library_only_offers_updates_from_the_installed_slice_source(tmp_path, m
     context = ApplicationContext(
         paths=paths,
         settings=SettingsStore(paths.settings),
+        shared_settings=SettingsStore(paths.shared_settings, DEFAULT_SHARED_SETTINGS),
         sources=SourceStore(paths.sources),
-        vault=VaultSession(VaultStore(paths.vault, paths.vault_key)),
+        vault=VaultStore(paths.vault, paths.vault_key),
         discovery=SliceDiscovery(paths.bundled_slices, paths.installed_slices),
         installer=SliceInstaller(paths.installed_slices),
     )

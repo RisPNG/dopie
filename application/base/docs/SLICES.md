@@ -1,6 +1,6 @@
 # Slice contract
 
-Every Slice occupies one folder and contains exactly one `slice.toml`. Catalogue discovery reads that manifest without importing executable Slice code. Installed versions live under `data/slices/<id>/versions/<version>` and `current.json` selects the active version.
+Every Slice occupies one folder and contains exactly one `slice.toml`. Catalogue discovery reads that manifest without importing executable Slice code. Each person's installed versions live under `data/users/<login>/slices/<id>/versions/<version>` and `current.json` selects the active version.
 
 ```text
 slices/
@@ -13,7 +13,7 @@ slices/
 
 ## Standard interface
 
-Downloaded Slices must use the standard interface. The Pie generates the form and runs the backend in that Slice's isolated Python environment.
+Downloaded Slices must use the standard interface. The Pie generates the form and runs the backend in a separate Python process that sees the Slice's own dependencies before anything else, so a Slice must declare every package it imports in its `requirements.lock`.
 
 ```toml
 id = "text-counter"
@@ -53,7 +53,7 @@ def run(inputs, progress, log):
     return {"result": inputs["text"]}
 ```
 
-Downloaded assets are cached under the Slice ID and version, verified before use, and exposed as file paths in `inputs["_assets"]`. A `requirements.lock` is optional; when present it must contain hashes accepted by `pip --require-hashes`.
+Downloaded assets are cached under the Slice ID and version, verified before use, and exposed as file paths in `inputs["_assets"]`. A `requirements.lock` is optional; when present it must contain hashes accepted by `pip --require-hashes`. Dependencies are installed once for each operating system and lock, and are shared by every Slice with the same lock and by everyone who runs DoPie from the folder, so a Slice must never write into them.
 
 ## Bundled custom interface
 

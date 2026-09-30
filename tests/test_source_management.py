@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dopie.context import ApplicationContext, VaultSession
+from dopie.context import ApplicationContext
 from dopie.models import CatalogSlice, SourceDefinition
 from dopie.paths import resolve_app_paths
 from dopie.security.vault import VaultStore
@@ -9,7 +9,7 @@ from dopie.slices.discovery import SliceDiscovery
 from dopie.slices.installer import SliceInstaller
 from dopie.sources.catalog import SourceCatalog
 from dopie.sources.remote import RemoteRepositoryClient
-from dopie.storage import SettingsStore, SourceStore
+from dopie.storage import DEFAULT_SHARED_SETTINGS, SettingsStore, SourceStore
 
 
 def test_source_can_be_edited_and_made_public_without_losing_cache(tmp_path, monkeypatch):
@@ -18,8 +18,9 @@ def test_source_can_be_edited_and_made_public_without_losing_cache(tmp_path, mon
     context = ApplicationContext(
         paths=paths,
         settings=SettingsStore(paths.settings),
+        shared_settings=SettingsStore(paths.shared_settings, DEFAULT_SHARED_SETTINGS),
         sources=SourceStore(paths.sources),
-        vault=VaultSession(VaultStore(paths.vault, paths.vault_key)),
+        vault=VaultStore(paths.vault, paths.vault_key),
         discovery=SliceDiscovery(paths.bundled_slices, paths.installed_slices),
         installer=SliceInstaller(paths.installed_slices),
     )
@@ -39,7 +40,7 @@ def test_source_can_be_edited_and_made_public_without_losing_cache(tmp_path, mon
     assert context.sources.load() == [updated]
     assert not paths.catalog_cache.joinpath("private.json").exists()
     assert paths.catalog_cache.joinpath("renamed.json").exists()
-    assert context.vault.secrets == {"credentials": {}}
+    assert context.vault.unlock() == {"credentials": {}}
 
 
 def test_unchanged_source_revision_reuses_its_cached_catalog(tmp_path, monkeypatch):
@@ -48,8 +49,9 @@ def test_unchanged_source_revision_reuses_its_cached_catalog(tmp_path, monkeypat
     context = ApplicationContext(
         paths=paths,
         settings=SettingsStore(paths.settings),
+        shared_settings=SettingsStore(paths.shared_settings, DEFAULT_SHARED_SETTINGS),
         sources=SourceStore(paths.sources),
-        vault=VaultSession(VaultStore(paths.vault, paths.vault_key)),
+        vault=VaultStore(paths.vault, paths.vault_key),
         discovery=SliceDiscovery(paths.bundled_slices, paths.installed_slices),
         installer=SliceInstaller(paths.installed_slices),
     )

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import uuid
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -42,8 +43,8 @@ class ProvisioningBackend:
 
     def apply_provisioning(self, pending: PendingProvisioning, password: str | None = None) -> None:
         PortableProfileService(self.paths).import_portable_profile(pending.profile, password)
-        pending.profile.unlink()
+        pending.profile.unlink(missing_ok=True)
         receipt = self.paths.data / "provisioning.json"
-        temporary = receipt.with_suffix(".tmp")
+        temporary = receipt.with_suffix(f".{uuid.uuid4().hex}.tmp")
         temporary.write_text(json.dumps({"profile_sha256": pending.digest}, indent=2), encoding="utf-8")
         temporary.replace(receipt)

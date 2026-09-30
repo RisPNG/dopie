@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import sys
 import zipfile
 from io import BytesIO
 
@@ -15,7 +16,7 @@ from dopie.sources.remote import RemoteRepositoryClient
 from dopie.workspace.backend import SliceEnvironmentManager
 
 
-def test_standard_slice_gets_an_isolated_environment_without_dependencies(tmp_path):
+def test_standard_slice_without_dependencies_needs_no_environment(tmp_path):
     slice_root = tmp_path / "slice"
     slice_root.mkdir()
     manifest_path = slice_root / "slice.toml"
@@ -27,26 +28,38 @@ def test_standard_slice_gets_an_isolated_environment_without_dependencies(tmp_pa
 
     plan = SliceEnvironmentManager(tmp_path / "environments").prepare_slice_environment(manifest)
 
-    assert len(plan.commands) == 1
-    assert plan.commands[0][1:3] == ("-m", "venv")
-    assert plan.python != manifest.path
+    assert plan.packages is None
+    assert plan.commands == ()
+    assert plan.staging is None
 
 
-def test_slice_dependency_install_does_not_use_the_user_cache(tmp_path):
-    slice_root = tmp_path / "slice"
-    slice_root.mkdir()
-    manifest_path = slice_root / "slice.toml"
-    manifest_path.write_text(
-        'id="safe"\nname="Safe"\nversion="1.0.0"\ndescription="Safe"\ninterface="standard"\noperation="backend:run"',
-        encoding="utf-8",
-    )
-    slice_root.joinpath("requirements.lock").write_text("", encoding="utf-8")
+def test_slice_dependencies_install_once_into_a_shared_package_folder(tmp_path):
+    for slice_id in ("first", "second"):
+        slice_root = tmp_path / slice_id
+        slice_root.mkdir()
+        slice_root.joinpath("slice.toml").write_text(
+            f'id="{slice_id}"\nname="Safe"\nversion="1.0.0"\ndescription="Safe"\ninterface="standard"\n'
+            'operation="backend:run"',
+            encoding="utf-8",
+        )
+        slice_root.joinpath("requirements.lock").write_text("openpyxl==3.1.5 --hash=sha256:0\n", encoding="utf-8")
+    manager = SliceEnvironmentManager(tmp_path / "environments")
 
-    plan = SliceEnvironmentManager(tmp_path / "environments").prepare_slice_environment(
-        SliceManifest.load(manifest_path)
-    )
+    first = manager.prepare_slice_environment(SliceManifest.load(tmp_path / "first" / "slice.toml"))
+    second = manager.prepare_slice_environment(SliceManifest.load(tmp_path / "second" / "slice.toml"))
 
-    assert "--no-cache-dir" in plan.commands[1]
+    assert first.packages == second.packages
+    assert first.packages.parent == tmp_path / "environments" / ("windows" if sys.platform == "win32" else "linux")
+    assert first.staging.parent == first.packages.parent
+    assert first.staging.name.startswith(f".{first.packages.name}-")
+    command = first.commands[0]
+    assert command[:5] == (sys.executable, "-I", "-m", "pip", "install")
+    assert "--no-cache-dir" in command
+    assert "--require-hashes" in command
+    assert command[command.index("--target") + 1] == str(first.staging)
+    first.staging.mkdir()
+    first.staging.rename(first.packages)
+    assert manager.prepare_slice_environment(SliceManifest.load(tmp_path / "first" / "slice.toml")).commands == ()
 
 
 def test_slice_assets_are_downloaded_and_verified(tmp_path):

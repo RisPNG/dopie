@@ -10,12 +10,18 @@ DoPie expects `index.json` at the root of the selected branch unless a different
 
 ## Private Sources
 
-GitHub and Forgejo access tokens are referenced by credential ID in `data/sources.json`. The tokens are encrypted with AES-256-GCM in `data/source-vault.dopie`, and its randomly generated local key stays in `data/source-vault.key`. Both files remain inside the portable DoPie folder. Tokens should be read-only, repository-scoped, independently revocable, and time-limited.
+GitHub and Forgejo access tokens are referenced by credential ID in `data/sources.json`. The tokens are encrypted with AES-256-GCM in `data/source-vault.dopie`, and its randomly generated local key stays in `data/source-vault.key`. Both files remain inside the portable DoPie folder and are shared by everyone who runs DoPie from it. The DoPie update repository is the `application_update_source` entry of `data/preferences.json`, and its token uses the credential ID `application:update`. Tokens should be read-only, repository-scoped, independently revocable, and time-limited.
+
+## Shared use
+
+When several people run DoPie from one folder, every Source, access token, and update repository change re-reads the current files and replaces them through a uniquely named temporary file, so people keep each other's changes; two saves of the same file at the same moment keep the last one. On Windows, a save can fail while someone else is reading that file; repeat it. Leftover `.tmp` files are harmless. The key sits beside the vault, so folder permissions are the only protection for the access tokens.
 
 ## Portable profiles
 
 The portable copy includes a `.dopie-profile` containing Source definitions, portable preferences, and private Source credentials. Credentials are re-encrypted for transfer using an Argon2id-derived key and AES-256-GCM. The transfer password is optional: leaving it blank uses an empty password, includes the credentials without password protection, and allows automatic import. The folder-local key is never exported. When a password is set, communicate it separately from the profile.
 
 **Export Portable Copy** builds a clean transferable ZIP containing the selected Linux, Windows, or both launch scripts, application source, documentation, and `provisioning/DoPie.dopie-profile`. Installed Slices and the runtime are never included; the receiving computer obtains Slices from the configured Sources and downloads and verifies its own runtime on first launch. The receiving copy imports the profile on first launch, asks for the transfer password once when required, creates a new folder-local vault key, records the profile digest in `data/provisioning.json`, and deletes the one-time profile. An incorrect password changes no Source state and leaves the profile available for another attempt. Placing a new profile at the provisioning path starts a new authorization.
+
+Importing a profile replaces the Sources, update repository, and access tokens for everyone who runs DoPie from the folder, while its portable preferences apply to the person importing it.
 
 Setting a transfer password protects the access token during transfer; it does not make a shared token non-transferable after an authorized recipient unlocks it. Issue a different revocable token for each recipient or deployment group when that distinction matters.

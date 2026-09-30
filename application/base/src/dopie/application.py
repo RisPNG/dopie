@@ -8,7 +8,7 @@ from PySide6.QtCore import QTimer
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QApplication
 
-from dopie.context import ApplicationContext, VaultSession
+from dopie.context import ApplicationContext
 from dopie.desktop import install_linux_desktop_entry, remove_linux_desktop_entry
 from dopie.paths import resolve_app_paths
 from dopie.provisioning.backend import ProvisioningBackend
@@ -18,7 +18,7 @@ from dopie.shell.frontend import MainWindow
 from dopie.slice_manager.backend import SliceManagerBackend
 from dopie.slices.discovery import SliceDiscovery
 from dopie.slices.installer import SliceInstaller
-from dopie.storage import SettingsStore, SourceStore
+from dopie.storage import DEFAULT_SHARED_SETTINGS, SettingsStore, SourceStore
 from dopie.theme import ThemeController
 
 
@@ -45,8 +45,9 @@ def main() -> int:
     context = ApplicationContext(
         paths=paths,
         settings=settings,
+        shared_settings=SettingsStore(paths.shared_settings, DEFAULT_SHARED_SETTINGS),
         sources=SourceStore(paths.sources),
-        vault=VaultSession(VaultStore(paths.vault, paths.vault_key)),
+        vault=VaultStore(paths.vault, paths.vault_key),
         discovery=SliceDiscovery(paths.bundled_slices, paths.installed_slices),
         installer=SliceInstaller(paths.installed_slices),
     )

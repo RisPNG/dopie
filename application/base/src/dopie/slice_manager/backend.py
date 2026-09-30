@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import time
+import uuid
 from collections.abc import Callable
 from dataclasses import asdict, dataclass
 
@@ -82,7 +83,7 @@ class SliceManagerBackend:
                     if cached_revision == revision
                     else SourceCatalog().fetch_available_slices(source, token, revision)
                 )
-                temporary = cache.with_suffix(".tmp")
+                temporary = cache.with_suffix(f".{uuid.uuid4().hex}.tmp")
                 temporary.write_text(
                     json.dumps({"revision": revision, "items": [asdict(item) for item in items]}, indent=2),
                     encoding="utf-8",
@@ -102,7 +103,9 @@ class SliceManagerBackend:
         compatibility = evaluate_slice_compatibility(item)
         if not compatibility.compatible:
             raise ValueError(compatibility.reason)
-        source = next(source for source in self.context.sources.load() if source.id == item.source_id)
+        source = next((source for source in self.context.sources.load() if source.id == item.source_id), None)
+        if source is None:
+            raise ValueError(f"Source no longer exists: {item.source_id}")
         token = self.context.vault.source_credential(source.credential)
         self.context.installer.install_slice(item, source, token, progress)
 
@@ -144,7 +147,9 @@ class SliceManagerBackend:
 
     def update_source(self, original_id: str, updated: SourceDefinition, token: str | None = None) -> None:
         sources = self.context.sources.load()
-        original = next(source for source in sources if source.id == original_id)
+        original = next((source for source in sources if source.id == original_id), None)
+        if original is None:
+            raise ValueError(f"Source no longer exists: {original_id}")
         if any(source.id == updated.id and source.id != original_id for source in sources):
             raise ValueError(f"Source id already exists: {updated.id}")
         if token and updated.credential:
@@ -161,7 +166,9 @@ class SliceManagerBackend:
 
     def remove_source(self, source_id: str) -> None:
         sources = self.context.sources.load()
-        source = next(source for source in sources if source.id == source_id)
+        source = next((source for source in sources if source.id == source_id), None)
+        if source is None:
+            raise ValueError(f"Source no longer exists: {source_id}")
         if source.credential:
             self.context.vault.remove_source_credential(source.credential)
         self.context.sources.save([source for source in sources if source.id != source_id])

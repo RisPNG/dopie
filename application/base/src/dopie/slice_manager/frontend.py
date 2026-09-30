@@ -235,12 +235,16 @@ class SliceManagerPage(QWidget):
         toolbar.addWidget(export_copy)
         toolbar.addWidget(import_profile)
         toolbar.addStretch()
+        shared = QLabel("Sources and their access tokens are shared by everyone using this DoPie folder.")
+        shared.setObjectName("subtitle")
+        shared.setWordWrap(True)
         self.sources = DeselectableTreeWidget()
         self.sources.setHeaderLabels(["Source", "Repository URL", "Branch", "Access"])
         self.sources.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.sources.header().setSectionResizeMode(QHeaderView.Interactive)
         self.sources.header().setStretchLastSection(True)
         layout.addLayout(toolbar)
+        layout.addWidget(shared)
         layout.addWidget(self.sources)
 
     def refresh_installed(self) -> None:
@@ -256,10 +260,17 @@ class SliceManagerPage(QWidget):
     def tab_changed(self, index: int) -> None:
         if self.tabs.widget(index) is self.available_tab:
             self.refresh_available_if_stale(120)
+        elif self.tabs.widget(index) is self.sources_tab:
+            self.refresh_sources()
 
     def refresh_available_if_stale(self, max_age_seconds: int) -> None:
         if self.backend.source_catalogs_are_stale(max_age_seconds):
             self.refresh_available()
+            return
+        available = tuple(self.backend.context.available)
+        cached = self.backend.load_cached_catalogs()
+        if cached != available:
+            self.catalog_refreshed(CatalogRefresh(cached, ()))
 
     def refresh_available(self, source_ids: set[str] | None = None) -> None:
         if self.catalog_refresh_task is not None:
@@ -435,7 +446,12 @@ class SliceManagerPage(QWidget):
         if selected is None:
             return
         source_id = str(selected.data(0, Qt.UserRole))
-        self.backend.remove_source(source_id)
+        try:
+            self.backend.remove_source(source_id)
+        except Exception as error:
+            QMessageBox.critical(self, "Could not remove Source", str(error))
+            self.refresh_sources()
+            return
         self.refresh_sources()
         self.catalog_refreshed(CatalogRefresh(tuple(self.backend.context.available), ()))
 
@@ -444,7 +460,11 @@ class SliceManagerPage(QWidget):
         if selected is None:
             return
         source_id = str(selected.data(0, Qt.UserRole))
-        source = next(source for source in self.backend.context.sources.load() if source.id == source_id)
+        source = next((source for source in self.backend.context.sources.load() if source.id == source_id), None)
+        if source is None:
+            QMessageBox.critical(self, "Could not update Source", f"Source no longer exists: {source_id}")
+            self.refresh_sources()
+            return
         dialog = SourceDialog(self, source)
         if dialog.exec() != QDialog.Accepted:
             return
@@ -453,6 +473,7 @@ class SliceManagerPage(QWidget):
             self.backend.update_source(source_id, updated, dialog.token.text().strip() or None)
         except Exception as error:
             QMessageBox.critical(self, "Could not update Source", str(error))
+            self.refresh_sources()
             return
         self.refresh_sources()
         self.refresh_available({updated.id})
@@ -527,7 +548,7 @@ class SliceManagerPage(QWidget):
         answer = QMessageBox.question(
             self,
             "Import Portable Profile",
-            "Replace the current Source configuration and private Source vault?",
+            "Replace the Sources, update repository, and access tokens used by everyone in this DoPie folder?",
         )
         if answer != QMessageBox.Yes:
             return
@@ -547,7 +568,6 @@ class SliceManagerPage(QWidget):
         except Exception as error:
             QMessageBox.critical(self, "Profile import failed", str(error))
             return
-        self.backend.context.vault.secrets = None
         self.refresh_sources()
         self.refresh_installed()
         self.refresh_available()

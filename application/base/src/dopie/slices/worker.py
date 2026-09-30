@@ -3,8 +3,10 @@ from __future__ import annotations
 import hashlib
 import importlib.util
 import json
+import site
 import sys
 import types
+import uuid
 from pathlib import Path
 from typing import Any
 from urllib.request import Request, urlopen
@@ -48,7 +50,7 @@ def prepare_slice_assets(asset_root: Path, definitions: list[dict[str, str]]) ->
                 payload = response.read()
             if hashlib.sha256(payload).hexdigest() != expected:
                 raise ValueError(f"Checksum verification failed for asset {asset_id}")
-            temporary = destination.with_suffix(destination.suffix + ".prepared")
+            temporary = destination.with_name(f"{destination.name}.{uuid.uuid4().hex}.prepared")
             temporary.write_bytes(payload)
             temporary.replace(destination)
         resolved[asset_id] = str(destination)
@@ -66,6 +68,9 @@ def main() -> int:
         return 0
     slice_path = Path(sys.argv[1])
     operation = sys.argv[2]
+    if sys.argv[3]:
+        sys.path.insert(0, sys.argv[3])
+        site.addsitedir(sys.argv[3])
     inputs = json.loads(sys.stdin.read())
     try:
         result = execute_slice_operation(slice_path, operation, inputs)

@@ -5,6 +5,7 @@ import shutil
 import subprocess
 import tempfile
 import tomllib
+import uuid
 import zipfile
 from collections.abc import Callable
 from io import BytesIO
@@ -52,7 +53,7 @@ class ApplicationUpdateService:
             with (self.active_application / "pyproject.toml").open("rb") as stream:
                 version = str(tomllib.load(stream)["project"]["version"])
             self.state.parent.mkdir(parents=True, exist_ok=True)
-            temporary = self.state.with_suffix(".tmp")
+            temporary = self.state.with_suffix(f".{uuid.uuid4().hex}.tmp")
             temporary.write_text(
                 json.dumps(
                     {
@@ -74,6 +75,12 @@ class ApplicationUpdateService:
         token: str | None = None,
         progress: Callable[[int], None] | None = None,
     ) -> dict[str, str]:
+        pending = self.updates / "pending.json"
+        prepared = self.updates / f"prepared-{revision[:8]}"
+        if pending.exists() and prepared.exists():
+            state = json.loads(pending.read_text(encoding="utf-8"))
+            if state["revision"] == revision:
+                return state
         client = RemoteRepositoryClient(source, token)
         archive = (
             client.download_repository_archive(revision)
@@ -99,10 +106,13 @@ class ApplicationUpdateService:
                     raise ValueError(f"DoPie update is missing {required}")
             with candidates[0].open("rb") as stream:
                 version = str(tomllib.load(stream)["project"]["version"])
-            prepared = self.updates / "prepared"
-            if prepared.exists():
-                shutil.rmtree(prepared)
-            shutil.copytree(project, prepared)
+            try:
+                project.rename(prepared)
+            except OSError:
+                if not prepared.exists():
+                    raise
         state = {"version": version, "revision": revision, "path": str(prepared)}
-        (self.updates / "pending.json").write_text(json.dumps(state, indent=2), encoding="utf-8")
+        temporary = pending.with_suffix(f".{uuid.uuid4().hex}.tmp")
+        temporary.write_text(json.dumps(state, indent=2), encoding="utf-8")
+        temporary.replace(pending)
         return state

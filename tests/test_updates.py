@@ -5,6 +5,8 @@ import zipfile
 from io import BytesIO
 from types import SimpleNamespace
 
+import pytest
+
 from dopie.models import SourceDefinition
 from dopie.sources.remote import RemoteRepositoryClient
 from dopie.updates.service import ApplicationUpdateService
@@ -131,8 +133,19 @@ def test_prepares_application_update_without_touching_active_source(tmp_path, mo
     ).prepare_update(source, "abcdef1234")
 
     assert state["version"] == "0.2.0"
-    assert (updates / "prepared" / "src" / "dopie" / "__init__.py").exists()
+    assert (updates / "prepared-abcdef12" / "src" / "dopie" / "__init__.py").exists()
     assert json.loads((updates / "pending.json").read_text(encoding="utf-8"))["revision"] == "abcdef1234"
+    assert not list(updates.glob("*.tmp"))
+    monkeypatch.setattr(
+        RemoteRepositoryClient,
+        "download_repository_archive",
+        lambda self, revision: pytest.fail("A prepared revision is downloaded again"),
+    )
+    assert ApplicationUpdateService(
+        updates,
+        tmp_path / "application" / "current.json",
+        tmp_path,
+    ).prepare_update(source, "abcdef1234") == state
 
 
 def test_managed_application_keeps_its_revision_inside_a_newer_checkout(tmp_path, monkeypatch):
@@ -160,3 +173,30 @@ def test_managed_application_keeps_its_revision_inside_a_newer_checkout(tmp_path
 
     assert revision == "checkout-revision"
     assert json.loads(state.read_text(encoding="utf-8")) == installed
+
+
+def test_preparing_a_revision_another_user_already_prepared_keeps_theirs(tmp_path, monkeypatch):
+    archive = BytesIO()
+    with zipfile.ZipFile(archive, "w") as package:
+        package.writestr("dopie-next/application/base/pyproject.toml", '[project]\nname = "dopie"\nversion = "0.2.0"\n')
+        package.writestr("dopie-next/application/base/src/dopie/application.py", "def main(): return 0\n")
+        package.writestr("dopie-next/application/base/requirements.lock", "")
+    monkeypatch.setattr(
+        RemoteRepositoryClient, "download_repository_archive", lambda self, revision: archive.getvalue()
+    )
+    updates = tmp_path / "updates"
+    theirs = updates / "prepared-abcdef12"
+    theirs.mkdir(parents=True)
+    theirs.joinpath("theirs").write_text("", encoding="utf-8")
+    updates.joinpath("pending.json").write_text(
+        json.dumps({"version": "0.1.9", "revision": "0123456789", "path": str(updates / "prepared-01234567")}),
+        encoding="utf-8",
+    )
+
+    state = ApplicationUpdateService(updates, tmp_path / "application" / "current.json", tmp_path).prepare_update(
+        SourceDefinition("dopie", "DoPie", "https://github.com/owner/dopie"), "abcdef1234"
+    )
+
+    assert state == {"version": "0.2.0", "revision": "abcdef1234", "path": str(theirs)}
+    assert theirs.joinpath("theirs").exists()
+    assert json.loads(updates.joinpath("pending.json").read_text(encoding="utf-8")) == state

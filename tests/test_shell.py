@@ -3,12 +3,12 @@ from __future__ import annotations
 import shutil
 from pathlib import Path
 
-from PySide6.QtCore import QPoint, Qt
+from PySide6.QtCore import QPoint, Qt, QThreadPool
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QAbstractItemView, QApplication, QHeaderView, QLabel, QMessageBox
 
 from dopie.components.frontend import IconCheckBox
-from dopie.context import ApplicationContext, VaultSession
+from dopie.context import ApplicationContext
 from dopie.models import CatalogSlice, SourceDefinition
 from dopie.paths import resolve_app_paths
 from dopie.preferences.backend import PreferencesBackend
@@ -19,8 +19,9 @@ from dopie.slice_manager.backend import CatalogRefresh
 from dopie.slice_manager.frontend import DeselectableTreeWidget
 from dopie.slices.discovery import SliceDiscovery
 from dopie.slices.installer import SliceInstaller
-from dopie.storage import SettingsStore, SourceStore
+from dopie.storage import DEFAULT_SHARED_SETTINGS, SettingsStore, SourceStore
 from dopie.theme import ThemeController
+from dopie.updates.service import ApplicationUpdateService
 
 
 def test_shell_builds_all_primary_pages_offscreen(tmp_path, monkeypatch):
@@ -47,12 +48,13 @@ def test_shell_builds_all_primary_pages_offscreen(tmp_path, monkeypatch):
     context = ApplicationContext(
         paths,
         SettingsStore(paths.settings),
+        SettingsStore(paths.shared_settings, DEFAULT_SHARED_SETTINGS),
         SourceStore(paths.sources),
-        VaultSession(VaultStore(paths.vault, paths.vault_key)),
+        VaultStore(paths.vault, paths.vault_key),
         SliceDiscovery(paths.bundled_slices, paths.installed_slices),
         SliceInstaller(paths.installed_slices),
     )
-    context.settings.save({"theme": "system", "last_seen_version": "1.1.6"})
+    context.settings.save({"theme": "system", "last_seen_version": "1.2.0"})
     context.sources.save(
         [SourceDefinition("community", "Community", "https://github.com/example/community")]
     )
@@ -146,6 +148,18 @@ def test_shell_builds_all_primary_pages_offscreen(tmp_path, monkeypatch):
     assert not hasattr(preferences, "vault_password")
     assert not hasattr(preferences, "confirm_vault_password")
     preferences.close()
+    checked = []
+    monkeypatch.setattr(
+        ApplicationUpdateService,
+        "check_for_update",
+        lambda self, source, token=None: checked.append(source.repository_url),
+    )
+    PreferencesBackend(context).configure_application_updates(
+        SourceDefinition("dopie-application", "DoPie Application", "https://git.example.test/team/dopie"), None
+    )
+    window.check_for_updates(False)
+    QThreadPool.globalInstance().waitForDone()
+    assert checked == ["https://git.example.test/team/dopie"]
     window.open_slice(window.library.backend.build_library()[0])
     workspace = window.pages.currentWidget()
     workspace.close_requested.emit()

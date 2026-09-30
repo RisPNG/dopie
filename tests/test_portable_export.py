@@ -5,7 +5,7 @@ import zipfile
 import pytest
 from PySide6.QtWidgets import QApplication, QFileDialog, QInputDialog, QMessageBox
 
-from dopie.context import ApplicationContext, VaultSession
+from dopie.context import ApplicationContext
 from dopie.models import SourceDefinition
 from dopie.paths import resolve_app_paths
 from dopie.provisioning.backend import ProvisioningBackend
@@ -15,7 +15,7 @@ from dopie.slice_manager.backend import SliceManagerBackend
 from dopie.slice_manager.frontend import SliceManagerPage
 from dopie.slices.discovery import SliceDiscovery
 from dopie.slices.installer import SliceInstaller
-from dopie.storage import SettingsStore, SourceStore
+from dopie.storage import DEFAULT_SHARED_SETTINGS, SettingsStore, SourceStore
 
 
 @pytest.mark.parametrize(
@@ -35,8 +35,9 @@ def test_private_copy_export_and_first_launch(tmp_path, monkeypatch, responses, 
     context = ApplicationContext(
         paths,
         SettingsStore(paths.settings),
+        SettingsStore(paths.shared_settings, DEFAULT_SHARED_SETTINGS),
         SourceStore(paths.sources),
-        VaultSession(VaultStore(paths.vault, paths.vault_key)),
+        VaultStore(paths.vault, paths.vault_key),
         SliceDiscovery(paths.bundled_slices, paths.installed_slices),
         SliceInstaller(paths.installed_slices),
     )

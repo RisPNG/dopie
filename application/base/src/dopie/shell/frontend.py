@@ -213,8 +213,7 @@ class MainWindow(QMainWindow):
         self.context.settings.save(settings)
 
     def check_for_updates(self, interactive: bool = True) -> None:
-        settings = self.context.settings.load()
-        configured = settings.get("application_update_source", {})
+        configured = self.context.shared_settings.load()["application_update_source"]
         if not configured.get("repository_url") and not configured.get("repository"):
             if interactive:
                 QMessageBox.information(

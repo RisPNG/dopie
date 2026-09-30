@@ -1,5 +1,6 @@
 #!/usr/bin/env sh
 set -eu
+umask 002
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 MANIFEST="$ROOT/bootstrap/runtime.json"
 LINUX=$(sed -n '/"linux"[[:space:]]*:/,/^[[:space:]]*}/p' "$MANIFEST")
@@ -7,7 +8,6 @@ URL=$(printf '%s\n' "$LINUX" | sed -n 's/.*"url"[[:space:]]*:[[:space:]]*"\([^"]
 SHA256=$(printf '%s\n' "$LINUX" | sed -n 's/.*"sha256"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')
 PYTHON_RELATIVE=$(printf '%s\n' "$LINUX" | sed -n 's/.*"python"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')
 PYTHON="$ROOT/runtime/linux/$PYTHON_RELATIVE"
-ARCHIVE="$ROOT/runtime/linux/MsPy.zip"
 SETUP_MARKER="$ROOT/runtime/linux/.setup-complete"
 if [ ! -f "$SETUP_MARKER" ] && [ "${DOPIE_SETUP_TERMINAL:-}" != "1" ] && [ ! -t 1 ]; then
     if command -v xdg-terminal-exec >/dev/null 2>&1; then
@@ -39,10 +39,12 @@ fi
 if [ ! -x "$PYTHON" ]; then
     printf 'Downloading and verifying the DoPie runtime...\n'
     mkdir -p "$ROOT/runtime/linux"
-    curl -fL "$URL" -o "$ARCHIVE"
-    printf '%s  %s\n' "$SHA256" "$ARCHIVE" | sha256sum -c -
-    unzip -q "$ARCHIVE" -d "$ROOT/runtime/linux"
-    rm "$ARCHIVE"
+    STAGING=$(mktemp -d "$ROOT/runtime/linux/.setup-XXXXXX")
+    trap 'rm -rf "$STAGING"' EXIT
+    curl -fL "$URL" -o "$STAGING/MsPy.zip"
+    printf '%s  %s\n' "$SHA256" "$STAGING/MsPy.zip" | sha256sum -c -
+    unzip -q "$STAGING/MsPy.zip" -d "$STAGING"
+    mv -T "$STAGING/${PYTHON_RELATIVE%%/*}" "$ROOT/runtime/linux/${PYTHON_RELATIVE%%/*}" || [ -x "$PYTHON" ]
 fi
 if [ ! -f "$SETUP_MARKER" ]; then
     printf 'Preparing the DoPie application environment...\n'

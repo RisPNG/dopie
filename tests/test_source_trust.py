@@ -8,6 +8,7 @@ import pytest
 from dopie.paths import resolve_app_paths
 from dopie.security.vault import VaultStore
 from dopie.sources.profile import PortableProfileService
+from dopie.storage import DEFAULT_SHARED_SETTINGS, SettingsStore, SourceStore
 
 
 @pytest.mark.parametrize("password", [None, "", "transfer password"])
@@ -108,3 +109,83 @@ def test_portable_copy_contains_launchers_profile_and_no_local_state(tmp_path, m
         assert "DoPie/portable.toml" not in names
         assert all(not name.startswith("DoPie/runtime/") for name in names)
         assert all("private-state" not in name for name in names)
+
+
+def test_import_replaces_the_shared_sources_and_merges_the_importers_preferences(tmp_path, monkeypatch):
+    monkeypatch.setenv("DOPIE_ROOT", str(tmp_path / "source"))
+    source_paths = resolve_app_paths()
+    source_paths.sources.write_text(
+        '[{"id":"private","name":"Private","repository_url":"https://github.com/owner/private",'
+        '"credential":"source:private"}]',
+        encoding="utf-8",
+    )
+    VaultStore(source_paths.vault, source_paths.vault_key).seal({"credentials": {"source:private": "token-value"}})
+    SettingsStore(source_paths.settings).save({"theme": "dark"})
+    profile = tmp_path / "portable.dopie-profile"
+    PortableProfileService(source_paths).export_portable_profile(profile, password="transfer password")
+    monkeypatch.setenv("DOPIE_ROOT", str(tmp_path / "shared"))
+    monkeypatch.setenv("LOGNAME", "bob")
+    SettingsStore(resolve_app_paths().settings).save({"favorites": ["local"]})
+    monkeypatch.setenv("LOGNAME", "alice")
+    paths = resolve_app_paths()
+    VaultStore(paths.vault, paths.vault_key).seal({"credentials": {"old": "old"}})
+
+    PortableProfileService(paths).import_portable_profile(profile, "transfer password")
+
+    assert [source.id for source in SourceStore(paths.sources).load()] == ["private"]
+    assert VaultStore(paths.vault, paths.vault_key).unlock() == {"credentials": {"source:private": "token-value"}}
+    assert SettingsStore(paths.shared_settings, DEFAULT_SHARED_SETTINGS).load()["application_update_source"][
+        "repository_url"
+    ] == "https://github.com/RisPNG/dopie"
+    alice = json.loads(paths.settings.read_text(encoding="utf-8"))
+    assert alice["theme"] == "dark"
+    assert "application_update_source" not in alice
+    assert paths.settings == paths.data / "users" / "alice" / "preferences.json"
+    assert json.loads((paths.data / "users" / "bob" / "preferences.json").read_text(encoding="utf-8"))[
+        "favorites"
+    ] == ["local"]
+
+
+def test_version_2_profile_update_repository_becomes_the_copys_update_repository(tmp_path, monkeypatch):
+    monkeypatch.setenv("DOPIE_ROOT", str(tmp_path))
+    paths = resolve_app_paths()
+    custom = {
+        "id": "dopie-application",
+        "name": "DoPie Application",
+        "repository_url": "https://git.example.test/team/dopie",
+        "reference": "stable",
+        "index": "index.json",
+        "credential": None,
+    }
+    profile = tmp_path / "existing.dopie-profile"
+    with zipfile.ZipFile(profile, "w") as archive:
+        archive.writestr("profile.json", json.dumps({
+            "format": "dopie-portable-profile", "version": 2, "private_sources": False,
+        }))
+        archive.writestr("data/sources.json", "[]")
+        archive.writestr("data/preferences.json", json.dumps({"theme": "light", "application_update_source": custom}))
+
+    PortableProfileService(paths).import_portable_profile(profile)
+
+    assert SettingsStore(paths.shared_settings, DEFAULT_SHARED_SETTINGS).load()["application_update_source"] == custom
+    assert SettingsStore(paths.settings).load()["theme"] == "light"
+
+
+def test_export_carries_the_shared_update_repository(tmp_path, monkeypatch):
+    monkeypatch.setenv("DOPIE_ROOT", str(tmp_path))
+    paths = resolve_app_paths()
+    shared_settings = SettingsStore(paths.shared_settings, DEFAULT_SHARED_SETTINGS)
+    shared_preferences = shared_settings.load()
+    shared_preferences["application_update_source"]["repository_url"] = "https://git.example.test/team/dopie"
+    shared_settings.save(shared_preferences)
+    profile = tmp_path / "portable.dopie-profile"
+
+    PortableProfileService(paths).export_portable_profile(profile)
+
+    with zipfile.ZipFile(profile) as archive:
+        manifest = json.loads(archive.read("profile.json"))
+        preferences = json.loads(archive.read("data/preferences.json"))
+        names = set(archive.namelist())
+    assert manifest["version"] == 2
+    assert "data/sources.json" in names
+    assert preferences["application_update_source"]["repository_url"] == "https://git.example.test/team/dopie"

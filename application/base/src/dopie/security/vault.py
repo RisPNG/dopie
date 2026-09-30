@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import json
 import os
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -16,14 +17,13 @@ class VaultStore:
         self.key_path = key_path
 
     def seal(self, secrets: dict[str, Any]) -> None:
-        self.path.parent.mkdir(parents=True, exist_ok=True)
         if self.key_path.exists():
             key = base64.b64decode(self.key_path.read_text(encoding="ascii"))
         else:
             key = os.urandom(32)
-            temporary_key = self.key_path.with_suffix(".tmp")
+            temporary_key = self.key_path.with_suffix(f".{uuid.uuid4().hex}.tmp")
+            temporary_key.touch(mode=0o660)
             temporary_key.write_text(base64.b64encode(key).decode("ascii"), encoding="ascii")
-            temporary_key.chmod(0o600)
             temporary_key.replace(self.key_path)
         nonce = os.urandom(12)
         header = {
@@ -39,7 +39,7 @@ class VaultStore:
             authenticated,
         )
         header["ciphertext"] = base64.b64encode(ciphertext).decode("ascii")
-        temporary = self.path.with_suffix(".tmp")
+        temporary = self.path.with_suffix(f".{uuid.uuid4().hex}.tmp")
         temporary.write_text(json.dumps(header, indent=2), encoding="utf-8")
         temporary.replace(self.path)
 
@@ -53,6 +53,21 @@ class VaultStore:
         authenticated = json.dumps(envelope, sort_keys=True, separators=(",", ":")).encode("utf-8")
         plaintext = AESGCM(key).decrypt(nonce, ciphertext, authenticated)
         return json.loads(plaintext)
+
+    def store_source_credential(self, credential_id: str, token: str) -> None:
+        secrets = self.unlock() if self.path.exists() else {"credentials": {}}
+        secrets.setdefault("credentials", {})[credential_id] = token
+        self.seal(secrets)
+
+    def source_credential(self, credential_id: str | None) -> str | None:
+        if credential_id is None:
+            return None
+        return str(self.unlock()["credentials"][credential_id])
+
+    def remove_source_credential(self, credential_id: str) -> None:
+        secrets = self.unlock()
+        secrets.get("credentials", {}).pop(credential_id, None)
+        self.seal(secrets)
 
     def export_for_transfer(self, password: str) -> bytes:
         salt = os.urandom(16)

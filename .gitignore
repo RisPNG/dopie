@@ -210,7 +210,7 @@ tempCodeRunnerFile.py
 .pypirc
 
 application/current.json
-application/current.tmp
+application/current.*.tmp
 application/versions/
 data/
 environments/

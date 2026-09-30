@@ -32,7 +32,17 @@ def test_launchers_use_the_shared_verified_runtime_manifest():
     assert 'setsid -f "$PYTHON"' in shell
     assert 'nohup "$PYTHON"' in shell
     assert "</dev/null >/dev/null 2>&1" in shell
-    assert '"--no-cache-dir"' in (root / "bootstrap" / "bootstrap.py").read_text(encoding="utf-8")
+    bootstrap = (root / "bootstrap" / "bootstrap.py").read_text(encoding="utf-8")
+    assert '"--no-cache-dir"' in bootstrap
+    assert '"--target"' in bootstrap
+    assert "import venv" not in bootstrap
+    assert shell.index("umask 002") < shell.index("mkdir")
+    assert 'mktemp -d "$ROOT/runtime/linux/.setup-XXXXXX"' in shell
+    assert "mv -T" in shell
+    assert "runtime/linux/MsPy.zip" not in shell
+    assert "[guid]::NewGuid()" in windows
+    assert "[System.IO.Directory]::Move" in windows
+    assert "runtime\\windows\\MsPy.zip" not in windows
     assert [path.name for path in root.glob("*.sh")] == ["start-dopie.sh"]
     assert [path.name for path in root.glob("*.vbs")] == ["Start DoPie.vbs"]
     subprocess.run(["sh", "-n", str(root / "start-dopie.sh")], check=True)

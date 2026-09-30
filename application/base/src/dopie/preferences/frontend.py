@@ -5,6 +5,7 @@ from PySide6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
     QFormLayout,
+    QLabel,
     QLineEdit,
     QMessageBox,
     QTabWidget,
@@ -53,7 +54,11 @@ class PreferencesDialog(QDialog):
         update_form.addRow("Repository URL", self.repository_url)
         update_form.addRow("Branch", self.reference)
         update_form.addRow("Access token", self.token)
+        shared = QLabel("The repository, branch, and access token apply to everyone using this DoPie folder.")
+        shared.setObjectName("subtitle")
+        shared.setWordWrap(True)
         update_layout.addLayout(update_form)
+        update_layout.addWidget(shared)
         update_layout.addStretch()
         buttons = QDialogButtonBox(QDialogButtonBox.Cancel | QDialogButtonBox.Save)
         buttons.rejected.connect(self.reject)
@@ -65,31 +70,32 @@ class PreferencesDialog(QDialog):
         theme_index = self.theme.findData(str(preferences.get("theme", "system")))
         self.theme.setCurrentIndex(max(theme_index, 0))
         self.check_updates.setChecked(bool(preferences.get("check_updates_on_launch", True)))
-        update_source = preferences.get("application_update_source", {})
+        update_source = backend.context.shared_settings.load()["application_update_source"]
         if update_source and (update_source.get("repository_url") or update_source.get("repository")):
             self.repository_url.setText(SourceDefinition.from_dict(update_source).repository_url)
         self.reference.setText(str(update_source.get("reference", "main")))
 
     def save(self) -> None:
         try:
-            previous = self.backend.load_preferences().get("application_update_source", {})
-            source = SourceDefinition(
-                id="dopie-application",
-                name="DoPie Application",
-                repository_url=self.repository_url.text().strip(),
-                reference=self.reference.text().strip() or "main",
-                index="index.json",
-                credential=str(previous["credential"]) if previous.get("credential") else None,
+            token = self.token.text().strip() or None
+            if self.repository_url.isModified() or self.reference.isModified() or token:
+                previous = self.backend.context.shared_settings.load()["application_update_source"]
+                source = SourceDefinition(
+                    id="dopie-application",
+                    name="DoPie Application",
+                    repository_url=self.repository_url.text().strip(),
+                    reference=self.reference.text().strip() or "main",
+                    index="index.json",
+                    credential=str(previous["credential"]) if previous.get("credential") else None,
+                )
+                self.backend.configure_application_updates(source, token)
+            self.backend.save_preferences(
+                {
+                    "include_available_in_library": self.include_available.isChecked(),
+                    "check_updates_on_launch": self.check_updates.isChecked(),
+                    "theme": self.theme.currentData(),
+                }
             )
-            self.backend.configure_application_updates(
-                source,
-                self.token.text().strip() or None,
-                self.include_available.isChecked(),
-                self.check_updates.isChecked(),
-            )
-            preferences = self.backend.load_preferences()
-            preferences["theme"] = self.theme.currentData()
-            self.backend.save_preferences(preferences)
         except Exception as error:
             QMessageBox.warning(self, "Preferences", str(error))
             return

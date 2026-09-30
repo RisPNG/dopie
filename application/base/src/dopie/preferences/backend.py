@@ -18,13 +18,7 @@ class PreferencesBackend:
         current.update(preferences)
         self.context.settings.save(current)
 
-    def configure_application_updates(
-        self,
-        source: SourceDefinition,
-        token: str | None,
-        include_available: bool,
-        check_updates: bool,
-    ) -> None:
+    def configure_application_updates(self, source: SourceDefinition, token: str | None) -> None:
         if token:
             self.context.vault.store_source_credential("application:update", token)
             source = SourceDefinition(
@@ -36,19 +30,13 @@ class PreferencesBackend:
                 credential="application:update",
                 enabled=source.enabled,
             )
-        current = self.context.settings.load()
-        current.update(
-            {
-                "include_available_in_library": include_available,
-                "check_updates_on_launch": check_updates,
-                "application_update_source": {
-                    "id": source.id,
-                    "name": source.name,
-                    "repository_url": source.repository_url,
-                    "reference": source.reference,
-                    "index": source.index,
-                    "credential": source.credential,
-                },
-            }
-        )
-        self.context.settings.save(current)
+        current = self.context.shared_settings.load()
+        current["application_update_source"] = {
+            "id": source.id,
+            "name": source.name,
+            "repository_url": source.repository_url,
+            "reference": source.reference,
+            "index": source.index,
+            "credential": source.credential,
+        }
+        self.context.shared_settings.save(current)

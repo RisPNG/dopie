@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any
 
 from dopie.models import CatalogSlice
 from dopie.paths import AppPaths
@@ -11,37 +10,13 @@ from dopie.slices.installer import SliceInstaller
 from dopie.storage import SettingsStore, SourceStore
 
 
-class VaultSession:
-    def __init__(self, store: VaultStore):
-        self.store = store
-        self.secrets: dict[str, Any] | None = None
-
-    def store_source_credential(self, credential_id: str, token: str) -> None:
-        if self.secrets is None:
-            self.secrets = self.store.unlock() if self.store.path.exists() else {"credentials": {}}
-        self.secrets.setdefault("credentials", {})[credential_id] = token
-        self.store.seal(self.secrets)
-
-    def source_credential(self, credential_id: str | None) -> str | None:
-        if credential_id is None:
-            return None
-        if self.secrets is None:
-            self.secrets = self.store.unlock()
-        return str(self.secrets["credentials"][credential_id])
-
-    def remove_source_credential(self, credential_id: str) -> None:
-        if self.secrets is None:
-            self.secrets = self.store.unlock()
-        self.secrets.get("credentials", {}).pop(credential_id, None)
-        self.store.seal(self.secrets)
-
-
 @dataclass
 class ApplicationContext:
     paths: AppPaths
     settings: SettingsStore
+    shared_settings: SettingsStore
     sources: SourceStore
-    vault: VaultSession
+    vault: VaultStore
     discovery: SliceDiscovery
     installer: SliceInstaller
     available: list[CatalogSlice] = field(default_factory=list)

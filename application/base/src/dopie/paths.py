@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import getpass
 import os
+import shutil
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -16,6 +18,7 @@ class AppPaths:
     slice_assets: Path
     catalog_cache: Path
     settings: Path
+    shared_settings: Path
     sources: Path
     vault: Path
     vault_key: Path
@@ -35,12 +38,21 @@ def resolve_app_paths() -> AppPaths:
     portable = True
     data = project / "data"
     data.mkdir(parents=True, exist_ok=True)
-    installed_slices = data / "slices"
+    user = data / "users" / getpass.getuser().rpartition("\\")[2].partition("@")[0].casefold()
+    installed_slices = user / "slices"
     slice_environments = data / "slice-environments"
     slice_assets = data / "slice-assets"
     catalog_cache = data / "catalog-cache"
     updates = data / "updates"
-    installed_slices.mkdir(exist_ok=True)
+    legacy_slices = data / "slices"
+    if legacy_slices.exists() and not installed_slices.exists():
+        user.mkdir(parents=True, exist_ok=True)
+        if (data / "preferences.json").exists():
+            shutil.copyfile(data / "preferences.json", user / "preferences.json")
+        if slice_environments.exists():
+            shutil.rmtree(slice_environments)
+        legacy_slices.rename(installed_slices)
+    installed_slices.mkdir(parents=True, exist_ok=True)
     slice_environments.mkdir(exist_ok=True)
     slice_assets.mkdir(exist_ok=True)
     catalog_cache.mkdir(exist_ok=True)
@@ -54,7 +66,8 @@ def resolve_app_paths() -> AppPaths:
         slice_environments=slice_environments,
         slice_assets=slice_assets,
         catalog_cache=catalog_cache,
-        settings=data / "preferences.json",
+        settings=user / "preferences.json",
+        shared_settings=data / "preferences.json",
         sources=data / "sources.json",
         vault=data / "source-vault.dopie",
         vault_key=data / "source-vault.key",

@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import json
+import shutil
 import sys
 from pathlib import Path
 
 from PySide6.QtCore import QProcess, Qt, Signal
 from PySide6.QtWidgets import (
+    QApplication,
     QCheckBox,
     QComboBox,
     QFileDialog,
@@ -38,6 +40,7 @@ class StandardSliceWidget(QWidget):
         self.process.setProcessChannelMode(QProcess.MergedChannels)
         self.process.readyReadStandardOutput.connect(self.read_process_output)
         self.process.finished.connect(self.process_finished)
+        QApplication.instance().aboutToQuit.connect(self.cancel_execution)
         self.commands: list[tuple[str, ...]] = []
         self.plan: EnvironmentPlan | None = None
         self.phase = "idle"
@@ -140,7 +143,7 @@ class StandardSliceWidget(QWidget):
         self.plan = self.environment_manager.prepare_slice_environment(self.manifest)
         self.commands = list(self.plan.commands)
         if self.manifest.assets:
-            self.commands.append((sys.executable, str(self.worker), "--prepare-assets", str(self.asset_root)))
+            self.commands.insert(0, (sys.executable, "-I", str(self.worker), "--prepare-assets", str(self.asset_root)))
         self.phase = "preparing"
         self.start_next_process()
 
@@ -153,16 +156,28 @@ class StandardSliceWidget(QWidget):
                 self.process.closeWriteChannel()
             return
         if self.phase == "preparing" and self.plan is not None:
-            if self.plan.marker is not None:
-                self.plan.marker.write_text("ready", encoding="utf-8")
+            if self.plan.staging is not None:
+                try:
+                    self.plan.staging.rename(self.plan.packages)
+                except OSError as error:
+                    if not self.plan.packages.exists():
+                        self.status.setText(f"Failed: {error}")
+                        self.process_finished(1)
+                        return
             self.phase = "running"
             self.status.setText("Running…")
             self.inputs["_assets"] = {
                 definition["id"]: str(self.asset_root / definition["id"]) for definition in self.manifest.assets
             }
             self.process.start(
-                str(self.plan.python),
-                [str(self.worker), str(self.manifest.path), str(self.manifest.operation)],
+                sys.executable,
+                [
+                    "-I",
+                    str(self.worker),
+                    str(self.manifest.path),
+                    str(self.manifest.operation),
+                    str(self.plan.packages or ""),
+                ],
             )
             self.process.write(json.dumps(self.inputs).encode("utf-8"))
             self.process.closeWriteChannel()
@@ -199,6 +214,8 @@ class StandardSliceWidget(QWidget):
         if self.phase == "preparing" and exit_code == 0:
             self.start_next_process()
             return
+        if self.plan is not None and self.plan.staging is not None:
+            shutil.rmtree(self.plan.staging, ignore_errors=True)
         if exit_code != 0 and not self.status.text().startswith("Failed"):
             self.status.setText(f"Failed with exit code {exit_code}")
         self.phase = "idle"
@@ -206,9 +223,10 @@ class StandardSliceWidget(QWidget):
         self.cancel_button.setEnabled(False)
 
     def cancel_execution(self) -> None:
-        self.process.kill()
         self.commands.clear()
         self.phase = "idle"
+        self.process.kill()
+        self.process.waitForFinished()
         self.status.setText("Cancelled")
         self.run_button.setEnabled(True)
         self.cancel_button.setEnabled(False)

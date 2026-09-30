@@ -1,14 +1,13 @@
 from __future__ import annotations
 
 import json
-import shutil
 import tempfile
 import zipfile
 from pathlib import Path
 
 from dopie.paths import AppPaths
 from dopie.security.vault import VaultStore
-from dopie.storage import SettingsStore, SourceStore
+from dopie.storage import DEFAULT_SHARED_SETTINGS, SettingsStore, SourceStore
 
 
 class PortableProfileService:
@@ -40,14 +39,11 @@ class PortableProfileService:
                 )
             settings = SettingsStore(self.paths.settings).load()
             portable_settings = {
-                key: settings[key]
-                for key in (
-                    "theme",
-                    "include_available_in_library",
-                    "check_updates_on_launch",
-                    "application_update_source",
-                )
+                key: settings[key] for key in ("theme", "include_available_in_library", "check_updates_on_launch")
             }
+            portable_settings["application_update_source"] = SettingsStore(
+                self.paths.shared_settings, DEFAULT_SHARED_SETTINGS
+            ).load()["application_update_source"]
             archive.writestr("data/preferences.json", json.dumps(portable_settings, indent=2))
 
     def export_portable_copy(
@@ -122,32 +118,30 @@ class PortableProfileService:
                 imported_sources.write_text("[]", encoding="utf-8")
             if not imported_preferences.exists():
                 imported_preferences.write_text("{}", encoding="utf-8")
-            SourceStore(imported_sources).load()
+            imported_source_list = SourceStore(imported_sources).load()
             portable_preferences = json.loads(imported_preferences.read_text(encoding="utf-8"))
             if not isinstance(portable_preferences, dict):
                 raise ValueError("Portable preferences must be a JSON object")
-            merged_preferences = SettingsStore(self.paths.settings).load()
-            merged_preferences.update(portable_preferences)
-            imported_preferences.write_text(json.dumps(merged_preferences, indent=2), encoding="utf-8")
             if manifest.get("private_sources"):
                 requires_password = manifest.get("requires_password", True)
                 if requires_password and not password:
                     raise ValueError("The transfer password is required")
                 staged_vault = imported_data / "authorized-source-vault.dopie"
                 staged_key = imported_data / "authorized-source-vault.key"
-                VaultStore(staged_vault, staged_key).import_from_transfer(
-                    imported_vault.read_bytes(), password if requires_password else ""
-                )
-                staged_vault.replace(self.paths.vault)
-                staged_key.replace(self.paths.vault_key)
+                staged = VaultStore(staged_vault, staged_key)
+                staged.import_from_transfer(imported_vault.read_bytes(), password if requires_password else "")
+                VaultStore(self.paths.vault, self.paths.vault_key).seal(staged.unlock())
             else:
                 self.paths.vault.unlink(missing_ok=True)
                 self.paths.vault_key.unlink(missing_ok=True)
-            for name, destination in (
-                ("sources.json", self.paths.sources),
-                ("preferences.json", self.paths.settings),
-            ):
-                imported = imported_data / name
-                temporary = destination.with_suffix(".importing")
-                shutil.copy2(imported, temporary)
-                temporary.replace(destination)
+            SourceStore(self.paths.sources).save(imported_source_list)
+            shared_settings = SettingsStore(self.paths.shared_settings, DEFAULT_SHARED_SETTINGS)
+            shared_preferences = shared_settings.load()
+            shared_preferences["application_update_source"] = portable_preferences.pop(
+                "application_update_source", shared_preferences["application_update_source"]
+            )
+            shared_settings.save(shared_preferences)
+            settings = SettingsStore(self.paths.settings)
+            preferences = settings.load()
+            preferences.update(portable_preferences)
+            settings.save(preferences)
