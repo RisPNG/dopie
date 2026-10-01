@@ -98,12 +98,12 @@ def activate_prepared_update(root: Path, prepare_only: bool = False) -> tuple[Pa
                 fcntl.flock(lock_stream, fcntl.LOCK_UN)
 
 
-def prepare_application_environment(root: Path, application: Path) -> Path:
+def prepare_application_environment(cache: Path, application: Path) -> Path:
     lock = application / "requirements.lock"
     fingerprint = hashlib.sha256(
         f"{sys.version_info.major}.{sys.version_info.minor}\n".encode("ascii") + lock.read_bytes()
     ).hexdigest()[:16]
-    environment = root / "environments" / ("windows" if sys.platform == "win32" else "linux") / fingerprint
+    environment = cache / "environments" / fingerprint
     if not environment.exists():
         environment.parent.mkdir(parents=True, exist_ok=True)
         staging = environment.with_name(f".{fingerprint}-{uuid.uuid4().hex[:8]}")
@@ -188,9 +188,14 @@ def restore_previous_application(root: Path, failed: Path) -> Path | None:
 
 def main(root: Path | None = None, prepare_only: bool = False) -> int:
     root = root or Path(__file__).resolve().parent.parent
+    cache = (
+        Path(os.environ["LOCALAPPDATA"]) / "DoPie"
+        if sys.platform == "win32"
+        else Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache")) / "dopie"
+    )
     application, activated = activate_prepared_update(root, prepare_only=prepare_only)
     try:
-        packages = prepare_application_environment(root, application)
+        packages = prepare_application_environment(cache, application)
         if prepare_only:
             return 0
         returncode, healthy = launch_application(root, application, packages)
@@ -198,14 +203,14 @@ def main(root: Path | None = None, prepare_only: bool = False) -> int:
         previous = restore_previous_application(root, application) if activated else None
         if previous is None:
             raise
-        packages = prepare_application_environment(root, previous)
+        packages = prepare_application_environment(cache, previous)
         return launch_application(root, previous, packages)[0]
     if returncode == 0 or healthy or not activated:
         return returncode
     previous = restore_previous_application(root, application)
     if previous is None:
         return returncode
-    packages = prepare_application_environment(root, previous)
+    packages = prepare_application_environment(cache, previous)
     return launch_application(root, previous, packages)[0]
 
 

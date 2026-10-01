@@ -257,6 +257,8 @@ def test_only_the_launch_that_activated_an_update_rolls_it_back(tmp_path, bootst
 
 def test_prepare_only_builds_environment_without_launching_application(tmp_path, bootstrap, monkeypatch):
     application = application_folder(tmp_path / "application" / "base")
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "cache"))
     prepared: list[tuple[Path, Path]] = []
     monkeypatch.setattr(
         bootstrap, "prepare_application_environment", lambda root, active: prepared.append((root, active))
@@ -268,7 +270,7 @@ def test_prepare_only_builds_environment_without_launching_application(tmp_path,
     )
 
     assert bootstrap.main(tmp_path, prepare_only=True) == 0
-    assert prepared == [(tmp_path, application)]
+    assert prepared == [(tmp_path / "cache" / ("DoPie" if sys.platform == "win32" else "dopie"), application)]
 
 
 def test_prepare_only_preserves_a_pending_update_for_startup_and_rollback(tmp_path, bootstrap, monkeypatch):
@@ -367,7 +369,7 @@ def test_application_packages_are_built_once_into_a_relocatable_folder(tmp_path,
 
     packages = bootstrap.prepare_application_environment(tmp_path, application)
 
-    assert packages.parent == tmp_path / "environments" / ("windows" if sys.platform == "win32" else "linux")
+    assert packages.parent == tmp_path / "environments"
     assert packages.joinpath("installed").exists()
     assert commands[0][:5] == [sys.executable, "-I", "-m", "pip", "install"]
     assert "--no-cache-dir" in commands[0] and "--require-hashes" in commands[0]
@@ -379,7 +381,7 @@ def test_application_packages_are_built_once_into_a_relocatable_folder(tmp_path,
 
 def test_application_package_builds_clean_up_after_losing_a_race_or_failing(tmp_path, bootstrap, monkeypatch):
     application = application_folder(tmp_path / "application" / "base")
-    environments = tmp_path / "environments" / ("windows" if sys.platform == "win32" else "linux")
+    environments = tmp_path / "environments"
 
     def lose_race(command, check):
         target = Path(command[command.index("--target") + 1])

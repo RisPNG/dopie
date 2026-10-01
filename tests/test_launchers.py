@@ -28,7 +28,8 @@ def test_launchers_use_the_shared_verified_runtime_manifest():
     assert "DOPIE_SETUP_TERMINAL" in shell
     assert "xdg-terminal-exec" in shell
     assert 'bootstrap/bootstrap.py" --prepare-only' in shell
-    assert 'runtime/linux/.setup-complete' in shell
+    assert 'RUNTIME="${XDG_CACHE_HOME:-$HOME/.cache}/dopie/runtime"' in shell
+    assert 'SETUP_MARKER="$RUNTIME/.setup-complete"' in shell
     assert 'setsid -f "$PYTHON"' in shell
     assert 'nohup "$PYTHON"' in shell
     assert "</dev/null >/dev/null 2>&1" in shell
@@ -37,10 +38,16 @@ def test_launchers_use_the_shared_verified_runtime_manifest():
     assert '"--target"' in bootstrap
     assert "import venv" not in bootstrap
     assert shell.index("umask 002") < shell.index("mkdir")
-    assert 'mktemp -d "$ROOT/runtime/linux/.setup-XXXXXX"' in shell
+    assert 'mktemp -d "$RUNTIME/.setup-XXXXXX"' in shell
+    assert "$ROOT/runtime" not in shell
     assert "mv -T" in shell
     assert "runtime/linux/MsPy.zip" not in shell
     assert "[guid]::NewGuid()" in windows
+    assert 'Join-Path $env:LOCALAPPDATA "DoPie\\runtime"' in windows
+    assert 'Write-Host "Downloading and verifying the DoPie runtime..."' in windows
+    assert 'Write-Host "Preparing the DoPie application environment..."' in windows
+    assert 'Read-Host "DoPie setup failed. Press Enter to close"' in windows
+    assert '"%LOCALAPPDATA%"), "DoPie"), "runtime"), ".setup-complete"' in visual_basic
     assert "[System.IO.Directory]::Move" in windows
     assert "runtime\\windows\\MsPy.zip" not in windows
     assert [path.name for path in root.glob("*.sh")] == ["start-dopie.sh"]

@@ -211,6 +211,7 @@ tempCodeRunnerFile.py
 
 application/current.json
 application/current.*.tmp
+application/.updates.lock
 application/versions/
 data/
 environments/

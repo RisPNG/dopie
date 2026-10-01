@@ -3,6 +3,7 @@ from __future__ import annotations
 import getpass
 import os
 import shutil
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -42,7 +43,11 @@ def resolve_app_paths() -> AppPaths:
     data.mkdir(parents=True, exist_ok=True)
     user = data / "users" / getpass.getuser().rpartition("\\")[2].partition("@")[0].casefold()
     installed_slices = user / "slices"
-    slice_environments = data / "slice-environments"
+    slice_environments = (
+        Path(os.environ["LOCALAPPDATA"]) / "DoPie"
+        if sys.platform == "win32"
+        else Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache")) / "dopie"
+    ) / "slice-environments"
     slice_assets = data / "slice-assets"
     catalog_cache = data / "catalog-cache"
     updates = data / "updates"
@@ -52,11 +57,10 @@ def resolve_app_paths() -> AppPaths:
             user.mkdir(parents=True, exist_ok=True)
             if (data / "preferences.json").exists():
                 shutil.copyfile(data / "preferences.json", user / "preferences.json")
-            if slice_environments.exists():
-                shutil.rmtree(slice_environments)
+            if (data / "slice-environments").exists():
+                shutil.rmtree(data / "slice-environments")
             legacy_slices.rename(installed_slices)
         installed_slices.mkdir(parents=True, exist_ok=True)
-        slice_environments.mkdir(exist_ok=True)
         slice_assets.mkdir(exist_ok=True)
         catalog_cache.mkdir(exist_ok=True)
         updates.mkdir(exist_ok=True)

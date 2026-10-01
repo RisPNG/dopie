@@ -9,7 +9,7 @@ If Not files.FileExists(powershell) Then
 End If
 script = files.BuildPath(files.BuildPath(root, "bootstrap"), "Start DoPie.ps1")
 command = Chr(34) & powershell & Chr(34) & " -NoLogo -NoProfile -ExecutionPolicy Bypass -File " & Chr(34) & script & Chr(34)
-setupMarker = files.BuildPath(files.BuildPath(files.BuildPath(root, "runtime"), "windows"), ".setup-complete")
+setupMarker = files.BuildPath(files.BuildPath(files.BuildPath(shell.ExpandEnvironmentStrings("%LOCALAPPDATA%"), "DoPie"), "runtime"), ".setup-complete")
 If Not files.FileExists(setupMarker) Then
     exitCode = shell.Run(command & " -PrepareOnly", 1, True)
     If exitCode <> 0 Then

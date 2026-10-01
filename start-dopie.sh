@@ -7,8 +7,9 @@ LINUX=$(sed -n '/"linux"[[:space:]]*:/,/^[[:space:]]*}/p' "$MANIFEST")
 URL=$(printf '%s\n' "$LINUX" | sed -n 's/.*"url"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')
 SHA256=$(printf '%s\n' "$LINUX" | sed -n 's/.*"sha256"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')
 PYTHON_RELATIVE=$(printf '%s\n' "$LINUX" | sed -n 's/.*"python"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')
-PYTHON="$ROOT/runtime/linux/$PYTHON_RELATIVE"
-SETUP_MARKER="$ROOT/runtime/linux/.setup-complete"
+RUNTIME="${XDG_CACHE_HOME:-$HOME/.cache}/dopie/runtime"
+PYTHON="$RUNTIME/$PYTHON_RELATIVE"
+SETUP_MARKER="$RUNTIME/.setup-complete"
 if [ ! -f "$SETUP_MARKER" ] && [ "${DOPIE_SETUP_TERMINAL:-}" != "1" ] && [ ! -t 1 ]; then
     if command -v xdg-terminal-exec >/dev/null 2>&1; then
         DOPIE_SETUP_TERMINAL=1 xdg-terminal-exec sh "$0"
@@ -38,13 +39,13 @@ if [ ! -f "$SETUP_MARKER" ] && [ "${DOPIE_SETUP_TERMINAL:-}" != "1" ] && [ ! -t 
 fi
 if [ ! -x "$PYTHON" ]; then
     printf 'Downloading and verifying the DoPie runtime...\n'
-    mkdir -p "$ROOT/runtime/linux"
-    STAGING=$(mktemp -d "$ROOT/runtime/linux/.setup-XXXXXX")
+    (umask 077 && mkdir -p "$RUNTIME")
+    STAGING=$(mktemp -d "$RUNTIME/.setup-XXXXXX")
     trap 'rm -rf "$STAGING"' EXIT
     curl -fL "$URL" -o "$STAGING/MsPy.zip"
     printf '%s  %s\n' "$SHA256" "$STAGING/MsPy.zip" | sha256sum -c -
     unzip -q "$STAGING/MsPy.zip" -d "$STAGING"
-    mv -T "$STAGING/${PYTHON_RELATIVE%%/*}" "$ROOT/runtime/linux/${PYTHON_RELATIVE%%/*}" || [ -x "$PYTHON" ]
+    mv -T "$STAGING/${PYTHON_RELATIVE%%/*}" "$RUNTIME/${PYTHON_RELATIVE%%/*}" || [ -x "$PYTHON" ]
 fi
 if [ ! -f "$SETUP_MARKER" ]; then
     printf 'Preparing the DoPie application environment...\n'

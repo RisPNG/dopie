@@ -53,7 +53,7 @@ def run(inputs, progress, log):
     return {"result": inputs["text"]}
 ```
 
-Downloaded assets are cached under the Slice ID and version, verified before use, and exposed as file paths in `inputs["_assets"]`. A `requirements.lock` is optional; when present it must contain hashes accepted by `pip --require-hashes`. Dependencies are installed once for each operating system and lock, and are shared by every Slice with the same lock and by everyone who runs DoPie from the folder, so a Slice must never write into them.
+Downloaded assets are cached under the Slice ID and version, verified before use, and exposed as file paths in `inputs["_assets"]`. A `requirements.lock` is optional; when present it must contain hashes accepted by `pip --require-hashes`. Dependencies are installed once per computer for each lock, in that computer's DoPie cache, and are shared by every Slice with the same lock, so a Slice must never write into them.
 
 ## Bundled custom interface
 

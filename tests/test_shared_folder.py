@@ -75,8 +75,21 @@ def test_each_user_has_their_own_preferences_and_installed_slices(tmp_path, monk
     assert [item.id for item in LibraryBackend(bob.context).build_library()] == ["bob-tool"]
     assert alice.context.settings.load()["favorites"] == ["alice-tool"]
     assert bob.context.settings.load()["favorites"] == []
-    for shared in ("sources", "vault", "vault_key", "shared_settings", "catalog_cache", "slice_environments"):
+    for shared in ("sources", "vault", "vault_key", "shared_settings", "catalog_cache"):
         assert getattr(alice.context.paths, shared) == getattr(bob.context.paths, shared)
+
+
+def test_slice_dependencies_live_in_this_computers_cache(tmp_path, monkeypatch):
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "cache"))
+
+    paths = open_as("alice", tmp_path / "shared", monkeypatch).context.paths
+
+    assert paths.slice_environments == (
+        tmp_path / "cache" / ("DoPie" if sys.platform == "win32" else "dopie") / "slice-environments"
+    )
+    assert not paths.slice_environments.exists()
+    assert not (tmp_path / "shared" / "data" / "slice-environments").exists()
 
 
 @pytest.mark.parametrize("login", ["CORP\\JSmith", "jsmith@corp.example", "JSmith"])

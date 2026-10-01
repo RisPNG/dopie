@@ -49,7 +49,7 @@ def test_slice_dependencies_install_once_into_a_shared_package_folder(tmp_path):
     second = manager.prepare_slice_environment(SliceManifest.load(tmp_path / "second" / "slice.toml"))
 
     assert first.packages == second.packages
-    assert first.packages.parent == tmp_path / "environments" / ("windows" if sys.platform == "win32" else "linux")
+    assert first.packages.parent == tmp_path / "environments"
     assert first.staging.parent == first.packages.parent
     assert first.staging.name.startswith(f".{first.packages.name}-")
     command = first.commands[0]

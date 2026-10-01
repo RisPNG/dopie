@@ -27,7 +27,7 @@ class SliceEnvironmentManager:
         fingerprint = hashlib.sha256(
             f"{sys.version_info.major}.{sys.version_info.minor}\n".encode("ascii") + lock.read_bytes()
         ).hexdigest()[:16]
-        environment = self.environments / ("windows" if sys.platform == "win32" else "linux") / fingerprint
+        environment = self.environments / fingerprint
         if environment.exists():
             return EnvironmentPlan(environment, ())
         environment.parent.mkdir(parents=True, exist_ok=True)
