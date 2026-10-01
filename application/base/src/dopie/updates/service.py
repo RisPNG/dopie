@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 import shutil
 import subprocess
-import tempfile
 import tomllib
 import uuid
 import zipfile
@@ -102,8 +101,10 @@ class ApplicationUpdateService:
             if progress is None
             else client.download_repository_archive(revision, progress)
         )
-        with tempfile.TemporaryDirectory(prefix="dopie-update-", dir=self.updates) as temporary:
-            extracted = Path(temporary) / "archive"
+        staging = self.updates / f"dopie-update-{uuid.uuid4().hex[:8]}"
+        staging.mkdir()
+        try:
+            extracted = staging / "archive"
             extracted.mkdir()
             with zipfile.ZipFile(BytesIO(archive)) as package:
                 root = extracted.resolve()
@@ -137,3 +138,5 @@ class ApplicationUpdateService:
                 temporary_state.write_text(json.dumps(state, indent=2), encoding="utf-8")
                 temporary_state.replace(pending)
                 return state
+        finally:
+            shutil.rmtree(staging, ignore_errors=True)

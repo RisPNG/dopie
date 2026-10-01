@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import tempfile
 import zipfile
 from concurrent.futures import ThreadPoolExecutor
 from io import BytesIO
@@ -205,6 +206,31 @@ def test_preparing_a_revision_another_user_already_prepared_keeps_theirs(tmp_pat
     assert state == {"version": "0.2.0", "revision": "abcdef1234", "path": str(theirs)}
     assert theirs.joinpath("theirs").exists()
     assert json.loads(updates.joinpath("pending.json").read_text(encoding="utf-8")) == state
+
+
+def test_an_update_one_user_prepares_is_not_staged_in_an_owner_only_folder(tmp_path, monkeypatch):
+    archive = BytesIO()
+    with zipfile.ZipFile(archive, "w") as package:
+        package.writestr("dopie-next/application/base/pyproject.toml", '[project]\nname = "dopie"\nversion = "0.2.0"\n')
+        package.writestr("dopie-next/application/base/src/dopie/application.py", "def main(): return 0\n")
+        package.writestr("dopie-next/application/base/requirements.lock", "")
+    monkeypatch.setattr(
+        RemoteRepositoryClient, "download_repository_archive", lambda self, revision: archive.getvalue()
+    )
+    monkeypatch.setattr(
+        tempfile,
+        "mkdtemp",
+        lambda *args, **kwargs: pytest.fail("Windows hides files moved out of an owner-only folder from other users"),
+    )
+    updates = tmp_path / "updates"
+    updates.mkdir()
+
+    state = ApplicationUpdateService(updates, tmp_path / "application" / "current.json", tmp_path).prepare_update(
+        SourceDefinition("dopie", "DoPie", "https://github.com/owner/dopie"), "abcdef1234"
+    )
+
+    assert Path(state["path"]).joinpath("src", "dopie", "application.py").exists()
+    assert not list(updates.glob("dopie-update-*"))
 
 
 @pytest.mark.parametrize(

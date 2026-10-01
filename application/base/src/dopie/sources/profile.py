@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import shutil
 import tempfile
+import uuid
 import zipfile
 from pathlib import Path
 
@@ -108,8 +109,9 @@ class PortableProfileService:
             shared_folder_transaction(self.paths.data / ".configuration.lock"),
             shared_folder_transaction(self.paths.settings.parent / ".configuration.lock"),
         ):
-            with tempfile.TemporaryDirectory(prefix="dopie-profile-", dir=self.paths.data) as temporary:
-                staging = Path(temporary)
+            staging = self.paths.data / f"dopie-profile-{uuid.uuid4().hex[:8]}"
+            staging.mkdir()
+            try:
                 with zipfile.ZipFile(source) as archive:
                     root = staging.resolve()
                     for member in archive.infolist():
@@ -193,3 +195,5 @@ class PortableProfileService:
                         else:
                             backup.replace(destination)
                     raise
+            finally:
+                shutil.rmtree(staging, ignore_errors=True)

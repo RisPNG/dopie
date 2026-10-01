@@ -5,6 +5,7 @@ import os
 import shutil
 import subprocess
 import sys
+import tempfile
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from threading import Event, current_thread
@@ -24,6 +25,7 @@ from dopie.slice_manager.backend import SliceManagerBackend
 from dopie.slice_manager.frontend import SliceManagerPage
 from dopie.slices.discovery import SliceDiscovery
 from dopie.slices.installer import SliceInstaller
+from dopie.sources.profile import PortableProfileService
 from dopie.storage import DEFAULT_SHARED_SETTINGS, SettingsStore, SourceStore
 from dopie.workspace.backend import EnvironmentPlan
 from dopie.workspace.frontend import StandardSliceWidget
@@ -143,6 +145,26 @@ def test_users_share_sources_tokens_and_the_update_repository(tmp_path, monkeypa
     assert not bob.context.paths.settings.exists()
     with pytest.raises(ValueError, match="Source no longer exists: private"):
         bob.update_source("private", PRIVATE)
+
+
+def test_a_profile_one_user_imports_reaches_every_user(tmp_path, monkeypatch):
+    exporter = open_as("alice", tmp_path / "exporter", monkeypatch)
+    exporter.add_source(PRIVATE, "private-token")
+    profile = tmp_path / "shared.dopie-profile"
+    PortableProfileService(exporter.context.paths).export_portable_profile(profile)
+    monkeypatch.setattr(
+        tempfile,
+        "mkdtemp",
+        lambda *args, **kwargs: pytest.fail("Windows hides files moved out of an owner-only folder from other users"),
+    )
+
+    importer = open_as("alice", tmp_path / "shared", monkeypatch)
+    PortableProfileService(importer.context.paths).import_portable_profile(profile)
+    bob = open_as("bob", tmp_path / "shared", monkeypatch)
+
+    assert bob.context.sources.load() == [PRIVATE]
+    assert bob.context.vault.unlock() == {"credentials": {"source:private": "private-token"}}
+    assert not list(importer.context.paths.data.glob("dopie-profile-*"))
 
 
 def test_preferences_keep_the_update_repository_another_user_changed(tmp_path, monkeypatch):
