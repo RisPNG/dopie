@@ -42,7 +42,7 @@ url = "https://example.test/model.bin"
 sha256 = "sha256:replace-with-asset-digest"
 ```
 
-Supported input types are `text`, `multiline`, `integer`, `choice`, `boolean`, `file`, and `directory`. `_assets` is reserved by the Pie.
+Supported input types are `text`, `multiline`, `password`, `integer`, `choice`, `boolean`, `file`, `files`, and `directory`. A `files` input passes the operation a list of the chosen file paths in the order they were added, without repeats; the list is empty when no file was chosen, and `required = true` asks for at least one. `_assets` is reserved by the Pie.
 
 The operation receives `inputs`, `progress`, and `log`:
 

@@ -133,7 +133,7 @@ class ThemeController(QObject):
             QToolButton#favoriteButton[favorite="false"] {{ color: {colors.muted}; }}
             QToolButton#favoriteButton[favorite="true"] {{ color: {colors.accent}; }}
             QToolButton#favoriteButton:hover {{ background: transparent; color: {colors.accent_hover}; }}
-            QLineEdit, QComboBox, QSpinBox, QPlainTextEdit {{
+            QLineEdit, QComboBox, QSpinBox, QPlainTextEdit, QListWidget#fileList {{
                 background: {colors.surface};
                 border: 1px solid {colors.border};
                 border-radius: 7px;

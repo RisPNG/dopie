@@ -7,6 +7,7 @@ from pathlib import Path
 
 from PySide6.QtCore import QProcess, Qt, Signal
 from PySide6.QtWidgets import (
+    QAbstractItemView,
     QApplication,
     QCheckBox,
     QComboBox,
@@ -15,6 +16,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QListWidget,
     QPlainTextEdit,
     QProgressBar,
     QPushButton,
@@ -68,22 +70,46 @@ class StandardSliceWidget(QWidget):
             elif field_type == "boolean":
                 widget = QCheckBox()
                 widget.setChecked(bool(definition.get("default", False)))
-            elif field_type in {"file", "directory"}:
+            elif field_type in {"file", "files", "directory"}:
                 row = QWidget()
                 row_layout = QHBoxLayout(row)
                 row_layout.setContentsMargins(0, 0, 0, 0)
-                widget = QLineEdit()
+                widget = QListWidget() if field_type == "files" else QLineEdit()
                 browse = QPushButton("Browse")
+                buttons = QVBoxLayout()
+                buttons.addWidget(browse)
                 if field_type == "file":
                     browse.clicked.connect(
                         lambda checked=False, target=widget: target.setText(QFileDialog.getOpenFileName(self)[0])
                     )
+                elif field_type == "files":
+                    widget.setObjectName("fileList")
+                    widget.setSelectionMode(QAbstractItemView.ExtendedSelection)
+                    widget.setWordWrap(True)
+                    widget.setAlternatingRowColors(True)
+                    browse.clicked.connect(
+                        lambda checked=False, target=widget: target.addItems(
+                            [
+                                path
+                                for path in QFileDialog.getOpenFileNames(self)[0]
+                                if not target.findItems(path, Qt.MatchExactly)
+                            ]
+                        )
+                    )
+                    remove = QPushButton("Remove selected")
+                    remove.clicked.connect(
+                        lambda checked=False, target=widget: [
+                            target.model().removeRow(target.row(item)) for item in target.selectedItems()
+                        ]
+                    )
+                    buttons.addWidget(remove)
+                    buttons.addStretch()
                 else:
                     browse.clicked.connect(
                         lambda checked=False, target=widget: target.setText(QFileDialog.getExistingDirectory(self))
                     )
                 row_layout.addWidget(widget, 1)
-                row_layout.addWidget(browse)
+                row_layout.addLayout(buttons)
                 form.addRow(label, row)
                 self.fields[field_id] = widget
                 continue
@@ -129,9 +155,11 @@ class StandardSliceWidget(QWidget):
                 inputs[field_id] = widget.currentText()
             elif field_type == "boolean":
                 inputs[field_id] = widget.isChecked()
+            elif field_type == "files":
+                inputs[field_id] = [widget.item(index).text() for index in range(widget.count())]
             else:
                 inputs[field_id] = widget.text()
-            if definition.get("required") and inputs[field_id] in {"", None}:
+            if definition.get("required") and inputs[field_id] in ("", None, []):
                 self.status.setText(f"{definition.get('label', field_id)} is required.")
                 return
         self.inputs = inputs
