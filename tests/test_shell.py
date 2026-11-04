@@ -58,7 +58,7 @@ def test_shell_builds_all_primary_pages_offscreen(tmp_path, monkeypatch):
         SliceDiscovery(paths.bundled_slices, paths.installed_slices),
         SliceInstaller(paths.installed_slices),
     )
-    context.settings.save({"theme": "system", "last_seen_version": "1.2.3"})
+    context.settings.save({"theme": "system", "last_seen_version": "1.3.0"})
     context.sources.save(
         [SourceDefinition("community", "Community", "https://github.com/example/community")]
     )
@@ -87,6 +87,9 @@ def test_shell_builds_all_primary_pages_offscreen(tmp_path, monkeypatch):
     assert window.manager.sources.columnWidth(0) == source_width
     source_enabled.click()
     assert not context.sources.load()[0].enabled
+    assert window.manager.available.topLevelItemCount() == 0
+    window.manager.backend.set_source_enabled("community", True)
+    window.manager.refresh_sources()
     window.manager.catalog_refreshed(
         CatalogRefresh(
             (
@@ -107,10 +110,13 @@ def test_shell_builds_all_primary_pages_offscreen(tmp_path, monkeypatch):
         )
     )
     available_row = window.manager.available.topLevelItem(0)
-    assert available_row.text(4) == "Installed"
+    assert available_row.text(4) == "Available"
     assert not available_row.isDisabled()
     window.manager.available.setCurrentItem(available_row)
+    requested = []
+    monkeypatch.setattr(window.manager, "install_slice", requested.append)
     window.manager.install_selected()
+    assert [item.key for item in requested] == ["community/local"]
     assert window.manager.active_tasks == []
     assert window.topbar.parent() is not None
     assert not window.findChild(QLabel, "brandIcon").pixmap().isNull()

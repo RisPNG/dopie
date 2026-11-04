@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QMessageBox,
     QPushButton,
+    QTabBar,
     QTabWidget,
     QToolButton,
     QTreeWidget,
@@ -134,6 +135,7 @@ class SourceDialog(QDialog):
             reference=self.reference.text().strip() or "main",
             index=self.index.text().strip() or "index.json",
             credential=credential,
+            enabled=self.existing.enabled if self.existing else True,
         )
 
 
@@ -146,6 +148,7 @@ class SliceManagerPage(QWidget):
         super().__init__()
         self.backend = backend
         self.available_items: dict[str, CatalogSlice] = {}
+        self.catalog_errors: tuple[str, ...] = ()
         self.thread_pool = QThreadPool.globalInstance()
         self.active_tasks: list[BackgroundTask] = []
         self.catalog_refresh_task: BackgroundTask | None = None
@@ -175,8 +178,12 @@ class SliceManagerPage(QWidget):
 
     def _build_installed_tab(self) -> None:
         layout = QVBoxLayout(self.installed_tab)
+        self.installed_sources = QTabBar()
+        self.installed_sources.setExpanding(False)
+        self.installed_sources.setAccessibleName("Installed Slice Sources")
+        self.installed_sources.currentChanged.connect(self.refresh_installed)
         self.installed = DeselectableTreeWidget()
-        self.installed.setHeaderLabels(["Slice", "Version", "Category", "Origin"])
+        self.installed.setHeaderLabels(["Slice", "Version", "Category", "Source"])
         self.installed.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.installed.header().setSectionResizeMode(QHeaderView.Interactive)
         self.installed.header().setStretchLastSection(True)
@@ -189,6 +196,7 @@ class SliceManagerPage(QWidget):
         actions.addStretch()
         actions.addWidget(rollback)
         actions.addWidget(remove)
+        layout.addWidget(self.installed_sources)
         layout.addWidget(self.installed)
         layout.addLayout(actions)
 
@@ -203,6 +211,10 @@ class SliceManagerPage(QWidget):
         toolbar.addWidget(self.refresh_button)
         toolbar.addStretch()
         toolbar.addWidget(install)
+        self.available_sources = QTabBar()
+        self.available_sources.setExpanding(False)
+        self.available_sources.setAccessibleName("Available Slice Sources")
+        self.available_sources.currentChanged.connect(self.refresh_available_list)
         self.catalog_status = QLabel("")
         self.catalog_status.setObjectName("subtitle")
         self.available = DeselectableTreeWidget()
@@ -211,6 +223,7 @@ class SliceManagerPage(QWidget):
         self.available.header().setSectionResizeMode(QHeaderView.Interactive)
         self.available.header().setStretchLastSection(True)
         layout.addLayout(toolbar)
+        layout.addWidget(self.available_sources)
         layout.addWidget(self.catalog_status)
         layout.addWidget(self.available)
 
@@ -248,22 +261,60 @@ class SliceManagerPage(QWidget):
         layout.addWidget(self.sources)
 
     def refresh_installed(self) -> None:
+        self.refresh_source_tabs()
+        selected_source = self.installed_sources.tabData(self.installed_sources.currentIndex())
+        sources = {source.id: source.name for source in self.backend.context.sources.load()}
         self.installed.clear()
         for manifest in self.backend.installed_slices():
-            origin = "Installed" if manifest.origin == "installed" else "Bundled"
-            row = QTreeWidgetItem([manifest.name, manifest.version, manifest.category, origin])
+            source_id = manifest.source_id or ("@bundled" if manifest.origin == "bundled" else "@local")
+            if selected_source is not None and source_id != selected_source:
+                continue
+            source_name = (
+                sources.get(manifest.source_id, manifest.source_id)
+                if manifest.source_id
+                else ("Bundled" if manifest.origin == "bundled" else "Local")
+            )
+            row = QTreeWidgetItem([manifest.name, manifest.version, manifest.category, source_name])
             row.setData(0, Qt.UserRole, manifest)
             self.installed.addTopLevelItem(row)
         for column in range(self.installed.columnCount()):
             self.installed.resizeColumnToContents(column)
 
+    def refresh_source_tabs(self) -> None:
+        sources = [source for source in self.backend.context.sources.load() if source.enabled]
+        installed = self.backend.installed_slices()
+        for selector in (self.installed_sources, self.available_sources):
+            selected = selector.tabData(selector.currentIndex())
+            options: list[tuple[str, str | None]] = [("All", None)]
+            if selector is self.installed_sources:
+                if any(manifest.origin == "bundled" for manifest in installed):
+                    options.append(("Bundled", "@bundled"))
+                if any(manifest.origin == "installed" and manifest.source_id is None for manifest in installed):
+                    options.append(("Local", "@local"))
+            options.extend((source.name, source.id) for source in sources)
+            blocked = selector.blockSignals(True)
+            while selector.count():
+                selector.removeTab(0)
+            current_index = 0
+            for name, source_id in options:
+                index = selector.addTab(name)
+                selector.setTabData(index, source_id)
+                if selected == source_id:
+                    current_index = index
+            selector.setCurrentIndex(current_index)
+            selector.blockSignals(blocked)
+
     def tab_changed(self, index: int) -> None:
         if self.tabs.widget(index) is self.available_tab:
             self.refresh_available_if_stale(120)
+        elif self.tabs.widget(index) is self.installed_tab:
+            self.refresh_installed()
         elif self.tabs.widget(index) is self.sources_tab:
             self.refresh_sources()
 
     def refresh_available_if_stale(self, max_age_seconds: int) -> None:
+        self.refresh_installed()
+        self.refresh_available_list()
         if self.backend.source_catalogs_are_stale(max_age_seconds):
             self.refresh_available()
             return
@@ -303,32 +354,43 @@ class SliceManagerPage(QWidget):
         self.refresh_available(source_ids)
 
     def catalog_refreshed(self, refresh: CatalogRefresh) -> None:
-        items = refresh.items
+        self.available_items = {item.key: item for item in refresh.items}
+        self.catalog_errors = refresh.errors
+        self.refresh_installed()
+        self.refresh_available_list()
+        self.library_changed.emit()
+
+    def refresh_available_list(self) -> None:
+        selected_source = self.available_sources.tabData(self.available_sources.currentIndex())
+        sources = {source.id: source.name for source in self.backend.context.sources.load() if source.enabled}
+        items = [
+            item
+            for item in self.available_items.values()
+            if item.source_id in sources and (selected_source is None or item.source_id == selected_source)
+        ]
         self.available.clear()
-        self.available_items = {item.id: item for item in items}
-        installed = {item.id: item for item in self.backend.installed_slices()}
+        installed = {item.key: item for item in self.backend.installed_slices()}
         for item in items:
             compatibility = evaluate_slice_compatibility(item)
-            if item.id not in installed:
+            if item.key not in installed:
                 status = "Available"
-            elif item.is_update_for(installed[item.id]):
+            elif item.is_update_for(installed[item.key]):
                 status = "Update available"
             else:
                 status = "Installed"
             if not compatibility.compatible:
                 status = compatibility.reason
-            row = QTreeWidgetItem([item.name, item.version, item.category, item.source_id, status])
-            row.setData(0, Qt.UserRole, item.id)
+            row = QTreeWidgetItem([item.name, item.version, item.category, sources[item.source_id], status])
+            row.setData(0, Qt.UserRole, item.key)
             if not compatibility.compatible:
                 row.setDisabled(True)
             self.available.addTopLevelItem(row)
-        if refresh.errors:
-            self.catalog_status.setText("Using cached data where needed: " + " | ".join(refresh.errors))
+        if self.catalog_errors:
+            self.catalog_status.setText("Using cached data where needed: " + " | ".join(self.catalog_errors))
         else:
             self.catalog_status.setText(f"{len(items)} Slices available")
         for column in range(self.available.columnCount()):
             self.available.resizeColumnToContents(column)
-        self.library_changed.emit()
 
     def refresh_sources(self) -> None:
         self.sources.clear()
@@ -347,6 +409,8 @@ class SliceManagerPage(QWidget):
             self.sources.setItemWidget(row, 0, enabled)
         for column in range(self.sources.columnCount()):
             self.sources.resizeColumnToContents(column)
+        self.refresh_installed()
+        self.refresh_available_list()
 
     def install_selected(self) -> None:
         selected = self.available.currentItem()
@@ -359,12 +423,12 @@ class SliceManagerPage(QWidget):
 
     def install_slice(self, item: CatalogSlice) -> None:
         self.catalog_status.setText(f"Installing {item.name}…")
-        self.slice_installation_started.emit(item.id)
+        self.slice_installation_started.emit(item.key)
         task = BackgroundTask(lambda: self.backend.install_catalog_slice(item, task.signals.progress.emit))
         task.signals.progress.connect(
             lambda percent: (
                 self.catalog_status.setText(f"Installing {item.name}… {percent}%"),
-                self.slice_installation_progress.emit(item.id, percent),
+                self.slice_installation_progress.emit(item.key, percent),
             )
         )
         task.signals.completed.connect(lambda _: self.installation_completed(item))
@@ -399,7 +463,7 @@ class SliceManagerPage(QWidget):
         manifest = selected.data(0, Qt.UserRole)
         alternatives = [
             version
-            for version in self.backend.context.installer.installed_versions(manifest.id)
+            for version in self.backend.context.installer.installed_versions(manifest.id, manifest.source_id)
             if version != manifest.version
         ]
         if not alternatives:
@@ -418,10 +482,9 @@ class SliceManagerPage(QWidget):
 
     def source_enabled_changed(self, source_id: str, enabled: bool) -> None:
         self.backend.set_source_enabled(source_id, enabled)
+        self.catalog_refreshed(CatalogRefresh(self.backend.load_cached_catalogs(), ()))
         if enabled:
             self.refresh_available({source_id})
-        else:
-            self.catalog_refreshed(CatalogRefresh(self.backend.load_cached_catalogs(), ()))
 
     def add_source(self) -> None:
         dialog = SourceDialog(self)
@@ -475,6 +538,9 @@ class SliceManagerPage(QWidget):
             QMessageBox.critical(self, "Could not update Source", str(error))
             self.refresh_sources()
             return
+        for selector in (self.installed_sources, self.available_sources):
+            if selector.tabData(selector.currentIndex()) == source_id:
+                selector.setTabData(selector.currentIndex(), updated.id)
         self.refresh_sources()
         self.refresh_available({updated.id})
 

@@ -174,7 +174,7 @@ class MainWindow(QMainWindow):
             self.manager.refresh_available_if_stale(15 * 60)
 
     def open_slice(self, item: object) -> None:
-        self.library.backend.record_slice_opened(item.id)
+        self.library.backend.record_slice_opened(item.key)
         self.refresh_libraries()
         self.section_title.setText(item.name)
         workspace = WorkspacePage(

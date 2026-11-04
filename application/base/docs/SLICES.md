@@ -1,6 +1,8 @@
 # Slice contract
 
-Every Slice occupies one folder and contains exactly one `slice.toml`. Catalogue discovery reads that manifest without importing executable Slice code. Each person's installed versions live under `data/users/<login>/slices/<id>/versions/<version>` and `current.json` selects the active version.
+Every Slice occupies one folder and contains exactly one `slice.toml`. Catalogue discovery reads that manifest without importing executable Slice code. Each person's downloaded versions live under `data/users/<login>/slices/sources/<source-id>/<id>/versions/<version>` and `current.json` selects the active version. Local Slices without a Source live under `data/users/<login>/slices/local/<id>`. Existing installations move into these folders automatically, retaining their rollback versions.
+
+A downloaded Slice is identified by its Source ID and Slice ID together. Different Sources can publish the same Slice ID without sharing installations, updates, rollback versions, favourites, or recent items. Source IDs remain local to the DoPie folder. Editing a Source ID moves the corresponding installed Slices and preferences for every user of that folder.
 
 ```text
 slices/
@@ -53,7 +55,7 @@ def run(inputs, progress, log):
     return {"result": inputs["text"]}
 ```
 
-Downloaded assets are cached under the Slice ID and version, verified before use, and exposed as file paths in `inputs["_assets"]`. A `requirements.lock` is optional; when present it must contain hashes accepted by `pip --require-hashes`. Dependencies are installed once per computer for each lock, in that computer's DoPie cache, and are shared by every Slice with the same lock, so a Slice must never write into them.
+Downloaded assets are cached under `data/slice-assets/sources/<source-id>/<id>/<version>` for downloaded Slices and `data/slice-assets/local/<id>/<version>` for Slices without a Source, verified before use, and exposed as file paths in `inputs["_assets"]`. A `requirements.lock` is optional; when present it must contain hashes accepted by `pip --require-hashes`. Dependencies are installed once per computer for each lock, in that computer's DoPie cache, and are shared by every Slice with the same lock, so a Slice must never write into them.
 
 ## Bundled custom interface
 

@@ -46,7 +46,7 @@ class SliceCard(QFrame):
             favorite.setAccessibleName("Remove from Favorites" if item.favorite else "Add to Favorites")
             favorite.setToolTip("Remove from Favorites" if item.favorite else "Add to Favorites")
             favorite.setFixedSize(30, 30)
-            favorite.clicked.connect(lambda: self.favorite_changed.emit(item.id, not item.favorite))
+            favorite.clicked.connect(lambda: self.favorite_changed.emit(item.key, not item.favorite))
             heading.addWidget(favorite)
             heading.setAlignment(favorite, Qt.AlignVCenter)
         heading.addStretch()
@@ -54,7 +54,7 @@ class SliceCard(QFrame):
         description = QLabel(item.description)
         description.setWordWrap(True)
         description.setAlignment(Qt.AlignTop)
-        category = QLabel(item.category)
+        category = QLabel(f"{item.category} | {item.source_name}" if item.source_name else item.category)
         category.setObjectName("muted")
         actions = QHBoxLayout()
         actions.addStretch()
@@ -139,7 +139,7 @@ class LibraryPage(QWidget):
     def show_update_progress(self, slice_id: str, percent: int | None = None) -> None:
         for index in range(self.grid.count()):
             card = self.grid.itemWidget(self.grid.item(index))
-            if card.item.id != slice_id or not hasattr(card, "update_progress"):
+            if card.item.key != slice_id or not hasattr(card, "update_progress"):
                 continue
             card.update_button.setVisible(False)
             card.update_progress.setVisible(True)

@@ -32,6 +32,10 @@ class SliceManifest:
     origin: str = "bundled"
     source_id: str | None = None
 
+    @property
+    def key(self) -> str:
+        return f"{self.source_id}/{self.id}" if self.source_id else self.id
+
     @classmethod
     def load(cls, path: Path, source_id: str | None = None, origin: str = "bundled") -> SliceManifest:
         with path.open("rb") as stream:
@@ -158,6 +162,10 @@ class CatalogSlice:
     python: str = ">=3.11"
     platforms: tuple[str, ...] = ()
     architectures: tuple[str, ...] = ()
+
+    @property
+    def key(self) -> str:
+        return f"{self.source_id}/{self.id}"
 
     def is_update_for(self, manifest: SliceManifest) -> bool:
         if manifest.origin != "installed" or manifest.source_id != self.source_id or manifest.id != self.id:

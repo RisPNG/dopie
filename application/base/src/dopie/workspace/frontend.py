@@ -35,7 +35,11 @@ class StandardSliceWidget(QWidget):
         super().__init__()
         self.manifest = manifest
         self.worker = worker
-        self.asset_root = assets / manifest.id / manifest.version
+        self.asset_root = (
+            assets / "sources" / manifest.source_id / manifest.id / manifest.version
+            if manifest.source_id
+            else assets / "local" / manifest.id / manifest.version
+        )
         self.environment_manager = SliceEnvironmentManager(environments)
         self.fields: dict[str, QWidget] = {}
         self.process = QProcess(self)

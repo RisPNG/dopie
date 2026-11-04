@@ -8,6 +8,8 @@ DoPie is a source-run desktop platform for installing and running focused automa
 
 The Pie owns the Library, Favorites, Slice Manager, trusted Sources, private credentials, updates, preferences, progress, and presentation. Each Slice owns one operation and its domain behavior.
 
+In **Slice Manager**, Installed and Available have tabs for each enabled Source. All shows the complete list, including installed Slices whose Source has been disabled or removed. Different Sources can publish Slices with the same ID, and their installations, updates, rollback versions, favourites, and recent items remain independent.
+
 ## Development
 
 ```bash

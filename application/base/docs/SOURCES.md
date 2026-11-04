@@ -4,6 +4,8 @@ A Source is a GitHub or Forgejo repository URL containing an `index.json` catalo
 
 The index follows [source-index.example.json](source-index.example.json). Each package digest is required. Compatibility metadata lets the Pie explain why a Slice cannot be installed on the current Pie API, Python, operating system, or processor architecture.
 
+Installed and Available include Source tabs for each enabled Source. All shows the complete list, and Installed also groups bundled and local Slices when present. Disabling or removing a Source removes its available catalogue entries and Source tab. Its installed Slices remain accessible through Installed's All tab and the Library. Slices with the same ID from different Sources remain independent.
+
 ## Catalogue and package integrity
 
 DoPie expects `index.json` at the root of the selected branch unless a different relative Index path is configured under Advanced. The index tells DoPie which Slices exist and provides each package's SHA-256 digest. DoPie verifies that digest before installing a package. Repository identity relies on the configured HTTPS URL and the repository host's access controls.
