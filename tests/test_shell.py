@@ -10,6 +10,7 @@ from PySide6.QtCore import QPoint, Qt, QThreadPool
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QAbstractItemView, QApplication, QHeaderView, QLabel, QMessageBox
 
+from dopie import __version__
 from dopie.components.frontend import IconCheckBox
 from dopie.context import ApplicationContext
 from dopie.models import CatalogSlice, SourceDefinition
@@ -58,7 +59,7 @@ def test_shell_builds_all_primary_pages_offscreen(tmp_path, monkeypatch):
         SliceDiscovery(paths.bundled_slices, paths.installed_slices),
         SliceInstaller(paths.installed_slices),
     )
-    context.settings.save({"theme": "system", "last_seen_version": "1.3.0"})
+    context.settings.save({"theme": "system", "last_seen_version": __version__})
     context.sources.save(
         [SourceDefinition("community", "Community", "https://github.com/example/community")]
     )

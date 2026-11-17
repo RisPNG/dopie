@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import hashlib
 import json
+import subprocess
 import sys
 import zipfile
 from concurrent.futures import ThreadPoolExecutor
 from io import BytesIO
+from pathlib import Path
 from threading import Event
 
 import pytest
@@ -13,6 +15,7 @@ import pytest
 from dopie.models import CatalogSlice, SliceManifest
 from dopie.shared_folder import shared_folder_transaction
 from dopie.slices.compatibility import evaluate_slice_compatibility
+from dopie.slices.discovery import SliceDiscovery
 from dopie.slices.installer import SliceInstaller
 from dopie.slices.worker import prepare_slice_assets
 from dopie.workspace.backend import SliceEnvironmentManager
@@ -76,6 +79,58 @@ def test_slice_assets_are_downloaded_and_verified(tmp_path):
 
     assert (tmp_path / "assets" / "model.bin").read_bytes() == payload
     assert resolved["model.bin"].endswith("model.bin")
+
+
+@pytest.mark.parametrize("installed", [False, True], ids=["source", "installed"])
+def test_standard_slice_worker_imports_sibling_modules(tmp_path, installed):
+    slice_root = tmp_path / "source" / "tool"
+    slice_root.mkdir(parents=True)
+    slice_root.joinpath("slice.toml").write_text(
+        'id="tool"\nname="Tool"\nversion="0.1.0"\ndescription="Tool"\n'
+        'interface="standard"\noperation="backend:run"',
+        encoding="utf-8",
+    )
+    slice_root.joinpath("backend.py").write_text(
+        "from . import processor\n\n"
+        "def run(inputs, progress, log):\n"
+        "    progress(50, 'Processor loaded')\n"
+        "    log('Running tool')\n"
+        "    return {'answer': processor.ANSWER, 'name': inputs['name']}\n",
+        encoding="utf-8",
+    )
+    slice_root.joinpath("processor.py").write_text("ANSWER = 42\n", encoding="utf-8")
+    if installed:
+        archive = BytesIO()
+        with zipfile.ZipFile(archive, "w") as bundle:
+            for path in slice_root.iterdir():
+                bundle.write(path, f"tool/{path.name}")
+        payload = archive.getvalue()
+        item = CatalogSlice(
+            "tool", "Tool", "0.1.0", "Tool", "Other", "DoPie", "MIT",
+            "https://example.test/tool-0.1.0.zip", hashlib.sha256(payload).hexdigest(), "source",
+        )
+        installed_root = tmp_path / "installed"
+        SliceInstaller(installed_root).install_slice(item, payload)
+        [manifest] = SliceDiscovery(tmp_path / "bundled", installed_root).discover_installed_slices()
+        assert manifest.path == installed_root / "sources" / "source" / "tool" / "versions" / "0.1.0"
+    else:
+        manifest = SliceManifest.load(slice_root / "slice.toml")
+    worker = Path(__file__).parents[1] / "application" / "base" / "src" / "dopie" / "slices" / "worker.py"
+
+    completed = subprocess.run(
+        [sys.executable, "-I", str(worker), str(manifest.path), manifest.operation, ""],
+        input=json.dumps({"name": "Ada"}),
+        capture_output=True,
+        text=True,
+        check=True,
+        timeout=30,
+    )
+
+    assert [json.loads(line) for line in completed.stdout.splitlines()] == [
+        {"type": "progress", "value": 50, "message": "Processor loaded"},
+        {"type": "log", "message": "Running tool"},
+        {"type": "result", "value": {"answer": 42, "name": "Ada"}},
+    ]
 
 
 def test_installer_keeps_versions_and_can_roll_back(tmp_path):

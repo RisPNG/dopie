@@ -14,7 +14,7 @@ from urllib.request import Request, urlopen
 
 def execute_slice_operation(slice_path: Path, operation: str, inputs: dict[str, Any]) -> Any:
     module_name, function_name = operation.split(":", 1)
-    package_name = f"dopie_worker_{slice_path.name.replace('-', '_')}"
+    package_name = f"dopie_worker_{uuid.uuid4().hex}"
     package = types.ModuleType(package_name)
     package.__path__ = [str(slice_path)]
     sys.modules[package_name] = package
